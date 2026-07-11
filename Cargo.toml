@@ -1,0 +1,6 @@
+[package]
+name = "rounded-noto-sans"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
