@@ -17,6 +17,14 @@ use std::{fs, path};
 /// 字形を計算したうえで、丸みを OpenType の可変軸として持つ CFF2 可変
 /// フォントファイルへ変換し、`output_path` に書き出す。
 ///
+/// 本関数は、丸みを `ROND` 可変軸として連続的に調整できる可変フォントを
+/// 出力する経路であり、本クレートの冒頭 (`//!`) に掲げた最終目標の中核と
+/// なる公開 API として意図的に保持している。一方、配布フォントの生成
+/// (`generate`) と CLI (`main`) は、現時点では静的フォントを出力する
+/// `convert_static`・`convert_static_with_ascii` の経路のみを使用しており、
+/// 本関数を呼び出す手段はライブラリ API 以外にまだ公開していない。CLI へ
+/// の公開は、可変フォント出力の品質検証が済んだ段階で別途行う想定である。
+///
 /// 内部では `input_path` の読み込み、`outline::extract_glyphs` による全グリフの
 /// 輪郭抽出、各輪郭への `round::round_path_matched` の適用、
 /// `variable_font::build_variable_font` による可変フォントの組み立て、
