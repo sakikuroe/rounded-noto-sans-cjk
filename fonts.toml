@@ -1,0 +1,67 @@
+# 本リポジトリが既定で配布するフォントの一覧と、それぞれの丸みパラメータを
+# 定義する設定ファイルである。`cargo run --release --bin generate` から
+# 読み込んで使う。
+#
+# fonts_dir は、実行時のカレントディレクトリ (通常はリポジトリのルート) から
+# の相対パスである。ソースフォントはリポジトリに同梱していないため、実行前に
+# 各自で入手し、fonts_dir が指すディレクトリへ配置する必要がある。入手元と
+# 前処理の手順は README.md (英語版) / README.ja.md (日本語版) を参照。
+
+fonts_dir = "fonts"
+version = "Version 0.100"
+
+[[font]]
+name = "sans-regular"
+source = "weights/NotoSansCJKjp-DemiLight.otf"
+output = "RoundedNotoSansCJKJP-Regular.otf"
+base_radius = 40.0
+inner_radius = 0.0
+rond = 0.85
+family_name = "Rounded Noto Sans CJK JP"
+style_name = "Regular"
+
+[[font]]
+name = "sans-bold"
+# 静的な7ウェイト(Thin〜Black)ではなく、Noto Sans JP可変フォント
+# (google-fonts/NotoSansJP[wght].ttf) からweight=490をインスタンス化した
+# もの。TrueType(glyf)由来で輪郭の巻き方向がCFF由来と逆なため、
+# あらかじめfontToolsで全グリフの輪郭方向を反転済み。前処理の手順は
+# README を参照。
+source = "NotoSansJP-w490-reversed.ttf"
+output = "RoundedNotoSansCJKJP-Bold.otf"
+base_radius = 35.0
+inner_radius = 0.0
+rond = 1.00
+family_name = "Rounded Noto Sans CJK JP"
+style_name = "Bold"
+
+[[font]]
+name = "mono-regular"
+source = "NotoSansMonoCJKjp-Regular.otf"
+output = "RoundedNotoCodeCJKJP-Regular.otf"
+base_radius = 45.0
+inner_radius = 0.0
+rond = 0.85
+# ASCII (半角英数記号) だけをSource Code Pro (weight=480でインスタンス化
+# 済みの静的ファイル) の輪郭に差し替え、独自の丸みパラメータで丸める。
+ascii_source = "SourceCodePro-w480.otf"
+ascii_base_radius = 50.0
+ascii_inner_radius = 0.0
+ascii_rond = 0.75
+family_name = "Rounded Noto Code CJK JP"
+style_name = "Regular"
+
+[[font]]
+name = "mono-bold"
+source = "NotoSansMonoCJKjp-Bold.otf"
+output = "RoundedNotoCodeCJKJP-Bold.otf"
+base_radius = 45.0
+inner_radius = 0.0
+rond = 0.85
+# ASCIIはSource Code Pro Bold (静的、weight=700) に差し替える。
+ascii_source = "SourceCodePro-Bold.otf"
+ascii_base_radius = 100.0
+ascii_inner_radius = 0.0
+ascii_rond = 0.3
+family_name = "Rounded Noto Code CJK JP"
+style_name = "Bold"

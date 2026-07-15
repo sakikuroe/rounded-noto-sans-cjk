@@ -1,1 +1,9 @@
 /target
+
+# fonts.toml が既定で参照するソース・生成先のフォントディレクトリである。
+# ライセンス上の理由からソースフォントの二次配布物をリポジトリに含めない
+# ため、各自で入手して配置する必要がある (README.md / README.ja.md 参照)。
+/fonts
+
+# リリース梱包スクリプト (scripts/package-release.sh) の出力先である。
+/dist
