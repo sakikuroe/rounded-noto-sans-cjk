@@ -5,13 +5,10 @@
 //! (サポートしているのは CFF2 のみ)、テスト用の入力データはここで自前に
 //! バイト列として組み立てる。
 
-use write_fonts::FontBuilder;
-use write_fonts::OffsetMarker;
 use write_fonts::tables::{cmap, head, hhea, hmtx, maxp, name, os2, post};
-use write_fonts::types::{GlyphId, NameId, Tag};
+use write_fonts::types;
 
-use super::super::push_charstring_int;
-use crate::round;
+use super::super::super::round;
 
 /// テスト対象の元フォントに含めるグリフ数 (`.notdef` と正方形の 2 個)。
 const NUM_GLYPHS: u16 = 2;
@@ -120,13 +117,13 @@ fn build_cff1_table() -> Vec<u8> {
     let square_charstring = {
         let mut buf = Vec::new();
         // 100 100 rmoveto : 始点 (100, 100) へ移動する。
-        push_charstring_int(&mut buf, 100);
-        push_charstring_int(&mut buf, 100);
+        super::super::push_charstring_int(&mut buf, 100);
+        super::super::push_charstring_int(&mut buf, 100);
         buf.push(21);
         // 4 辺分の rlineto (5) を、正方形が閉じるように積み上げる。
         for (dx, dy) in [(500, 0), (0, 500), (-500, 0), (0, -500)] {
-            push_charstring_int(&mut buf, dx);
-            push_charstring_int(&mut buf, dy);
+            super::super::push_charstring_int(&mut buf, dx);
+            super::super::push_charstring_int(&mut buf, dy);
             buf.push(5);
         }
         buf.push(14); // endchar
@@ -172,8 +169,8 @@ fn build_cff1_table() -> Vec<u8> {
 /// # Returns
 /// `(元フォントのバイト列, matched_glyphs)` のタプルを返す。
 pub(super) fn build_test_font() -> (Vec<u8>, Vec<(kurbo::BezPath, kurbo::BezPath)>) {
-    let mut builder = FontBuilder::new();
-    builder.add_raw(Tag::new(b"CFF "), build_cff1_table());
+    let mut builder = write_fonts::FontBuilder::new();
+    builder.add_raw(types::Tag::new(b"CFF "), build_cff1_table());
 
     let head = head::Head {
         units_per_em: 1000,
@@ -220,22 +217,28 @@ pub(super) fn build_test_font() -> (Vec<u8>, Vec<(kurbo::BezPath, kurbo::BezPath
     // 不完全とみなして処理を拒否するため、テスト用のフォントであっても
     // 最小限のこれらのテーブルを用意しておく必要がある。
     let name_records = [
-        (NameId::new(1), "Rounded Noto Sans CJK Test"),
-        (NameId::new(2), "Regular"),
-        (NameId::new(3), "Rounded Noto Sans CJK Test: Regular"),
-        (NameId::new(4), "Rounded Noto Sans CJK Test Regular"),
-        (NameId::new(6), "RoundedNotoSansCJKTest-Regular"),
+        (types::NameId::new(1), "Rounded Noto Sans CJK Test"),
+        (types::NameId::new(2), "Regular"),
+        (types::NameId::new(3), "Rounded Noto Sans CJK Test: Regular"),
+        (types::NameId::new(4), "Rounded Noto Sans CJK Test Regular"),
+        (types::NameId::new(6), "RoundedNotoSansCJKTest-Regular"),
     ]
     .into_iter()
     .map(|(name_id, value)| {
-        name::NameRecord::new(3, 1, 0x0409, name_id, OffsetMarker::new(value.to_string()))
+        name::NameRecord::new(
+            3,
+            1,
+            0x0409,
+            name_id,
+            write_fonts::OffsetMarker::new(value.to_string()),
+        )
     })
     .collect();
     builder
         .add_table(&name::Name::new(name_records))
         .expect("name テーブルの組み立てに失敗した");
 
-    let cmap = cmap::Cmap::from_mappings([('A', GlyphId::new(1))])
+    let cmap = cmap::Cmap::from_mappings([('A', types::GlyphId::new(1))])
         .expect("cmap テーブルの組み立てに失敗した");
     builder
         .add_table(&cmap)

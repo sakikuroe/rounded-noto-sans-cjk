@@ -13,6 +13,7 @@
 ///   解析できない場合にパニックする。
 /// - `rounded_noto_sans_cjk::convert_static` がパニックする条件を満たした
 ///   場合、同様にパニックする。
+use std::{env, path};
 fn main() {
     // 凸角用の基準半径・凹角用の固定半径・丸みの度合いの既定値。
     // ユーザーが実際に見た目を比較検討したうえで選んだ値である。
@@ -20,7 +21,7 @@ fn main() {
     const DEFAULT_INNER_RADIUS: f64 = 5.0;
     const DEFAULT_T: f64 = 0.85;
 
-    let args = std::env::args().collect::<Vec<_>>();
+    let args = env::args().collect::<Vec<_>>();
     let (input_path, output_path, base_radius, inner_radius, t) = match args.as_slice() {
         [_, input_path, output_path] => (
             input_path,
@@ -49,8 +50,8 @@ fn main() {
     };
 
     rounded_noto_sans_cjk::convert_static(
-        std::path::Path::new(input_path),
-        std::path::Path::new(output_path),
+        path::Path::new(input_path),
+        path::Path::new(output_path),
         base_radius,
         inner_radius,
         t,

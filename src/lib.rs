@@ -11,7 +11,7 @@ pub mod outline;
 pub mod round;
 pub mod variable_font;
 
-use std::path::Path;
+use std::{fs, path};
 
 /// 1 つの静的 CFF フォントファイルを読み込み、すべてのグリフの角を丸めた
 /// 字形を計算したうえで、丸みを OpenType の可変軸として持つ CFF2 可変
@@ -44,8 +44,13 @@ use std::path::Path;
 ///   見つからない、またはエラー終了した場合にパニックする。
 /// - `output_path` へ書き込めない (親ディレクトリが存在しない、書き込み
 ///   権限がないなど) 場合にパニックする。
-pub fn convert(input_path: &Path, output_path: &Path, base_radius: f64, inner_radius: f64) {
-    let font_data = std::fs::read(input_path).expect("入力フォントの読み込みに失敗した");
+pub fn convert(
+    input_path: &path::Path,
+    output_path: &path::Path,
+    base_radius: f64,
+    inner_radius: f64,
+) {
+    let font_data = fs::read(input_path).expect("入力フォントの読み込みに失敗した");
     let glyphs = outline::extract_glyphs(&font_data);
     let matched_glyphs = glyphs
         .iter()
@@ -56,7 +61,7 @@ pub fn convert(input_path: &Path, output_path: &Path, base_radius: f64, inner_ra
         .collect::<Vec<_>>();
     let variable_font_data = variable_font::build_variable_font(&font_data, &matched_glyphs);
     let subroutinized_data = variable_font::subroutinize(&variable_font_data);
-    std::fs::write(output_path, subroutinized_data).expect("出力フォントの書き込みに失敗した");
+    fs::write(output_path, subroutinized_data).expect("出力フォントの書き込みに失敗した");
 }
 
 /// 1 つの静的 CFF フォントファイルを読み込み、すべてのグリフの角を丸めた
@@ -103,13 +108,13 @@ pub fn convert(input_path: &Path, output_path: &Path, base_radius: f64, inner_ra
 /// - `output_path` へ書き込めない (親ディレクトリが存在しない、書き込み
 ///   権限がないなど) 場合にパニックする。
 pub fn convert_static(
-    input_path: &Path,
-    output_path: &Path,
+    input_path: &path::Path,
+    output_path: &path::Path,
     base_radius: f64,
     inner_radius: f64,
     t: f64,
 ) {
-    let font_data = std::fs::read(input_path).expect("入力フォントの読み込みに失敗した");
+    let font_data = fs::read(input_path).expect("入力フォントの読み込みに失敗した");
     let glyphs = outline::extract_glyphs(&font_data);
     let rounded_glyphs = glyphs
         .iter()
@@ -121,7 +126,7 @@ pub fn convert_static(
         .collect::<Vec<_>>();
     let static_font_data = variable_font::build_static_font(&font_data, &rounded_glyphs);
     let subroutinized_data = variable_font::subroutinize(&static_font_data);
-    std::fs::write(output_path, subroutinized_data).expect("出力フォントの書き込みに失敗した");
+    fs::write(output_path, subroutinized_data).expect("出力フォントの書き込みに失敗した");
 }
 
 /// `convert_static` と同様に日本語 (非 ASCII) グリフを丸めたうえで、ASCII
@@ -156,9 +161,9 @@ pub fn convert_static(
 /// - `output_path` へ書き込めない場合にパニックする。
 #[allow(clippy::too_many_arguments)]
 pub fn convert_static_with_ascii(
-    input_path: &Path,
-    ascii_input_path: &Path,
-    output_path: &Path,
+    input_path: &path::Path,
+    ascii_input_path: &path::Path,
+    output_path: &path::Path,
     base_radius: f64,
     inner_radius: f64,
     t: f64,
@@ -169,9 +174,9 @@ pub fn convert_static_with_ascii(
     use kurbo::Shape;
     use skrifa::raw::TableProvider;
 
-    let font_data = std::fs::read(input_path).expect("入力フォントの読み込みに失敗した");
+    let font_data = fs::read(input_path).expect("入力フォントの読み込みに失敗した");
     let ascii_font_data =
-        std::fs::read(ascii_input_path).expect("ASCII差し替え元フォントの読み込みに失敗した");
+        fs::read(ascii_input_path).expect("ASCII差し替え元フォントの読み込みに失敗した");
 
     let glyphs = outline::extract_glyphs(&font_data);
     let ascii_glyphs = outline::extract_glyphs(&ascii_font_data);
@@ -243,5 +248,5 @@ pub fn convert_static_with_ascii(
 
     let static_font_data = variable_font::build_static_font(&font_data, &final_glyphs);
     let subroutinized_data = variable_font::subroutinize(&static_font_data);
-    std::fs::write(output_path, subroutinized_data).expect("出力フォントの書き込みに失敗した");
+    fs::write(output_path, subroutinized_data).expect("出力フォントの書き込みに失敗した");
 }

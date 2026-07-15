@@ -1,4 +1,7 @@
-use read_fonts::TableProvider;
+use std::{env, fs, path};
+
+use read_fonts::{TableProvider, types};
+use rounded_noto_sans_cjk::{config, naming};
 
 /// `font_path` のフォントファイルの `name` テーブルから、Windows
 /// プラットフォーム・英語 (米国) の著作権表示 (nameID 0) を読み取る。
@@ -20,12 +23,12 @@ use read_fonts::TableProvider;
 ///   解析できない場合にパニックする。
 /// - `font_path` の `name` テーブルに、Windows・英語 (米国) の著作権表示
 ///   (nameID 0) が存在しない場合にパニックする。
-fn read_copyright_notice(font_path: &std::path::Path) -> String {
+fn read_copyright_notice(font_path: &path::Path) -> String {
     const WINDOWS_PLATFORM_ID: u16 = 3;
     const WINDOWS_ENCODING_ID: u16 = 1;
     const WINDOWS_LANG_ID_EN_US: u16 = 0x0409;
 
-    let font_data = std::fs::read(font_path)
+    let font_data = fs::read(font_path)
         .unwrap_or_else(|e| panic!("{} の読み込みに失敗した: {e}", font_path.display()));
     let font = read_fonts::FontRef::new(&font_data).unwrap_or_else(|e| {
         panic!(
@@ -42,7 +45,7 @@ fn read_copyright_notice(font_path: &std::path::Path) -> String {
             record.platform_id() == WINDOWS_PLATFORM_ID
                 && record.encoding_id() == WINDOWS_ENCODING_ID
                 && record.language_id() == WINDOWS_LANG_ID_EN_US
-                && record.name_id() == read_fonts::types::NameId::COPYRIGHT_NOTICE
+                && record.name_id() == types::NameId::COPYRIGHT_NOTICE
         })
         .and_then(|record| record.string(string_data).ok())
         .map(|value| value.to_string())
@@ -108,10 +111,10 @@ fn build_copyright(original_copyright: &str, ascii_copyright: Option<&str>) -> S
 /// - 変換元フォント (または ASCII 差し替え元フォント) に著作権表示
 ///   (nameID 0) が存在しない場合にパニックする。
 fn main() {
-    let args = std::env::args().collect::<Vec<String>>();
+    let args = env::args().collect::<Vec<String>>();
     let config_path = args.get(1).map(String::as_str).unwrap_or("fonts.toml");
 
-    let config = rounded_noto_sans_cjk::config::Config::load(std::path::Path::new(config_path));
+    let config = config::Config::load(path::Path::new(config_path));
 
     for entry in &config.fonts {
         let source = config.source_path(entry);
@@ -186,14 +189,14 @@ fn main() {
         let original_copyright = read_copyright_notice(&source);
         let ascii_copyright = ascii_source.as_deref().map(read_copyright_notice);
         let copyright = build_copyright(&original_copyright, ascii_copyright.as_deref());
-        let naming = rounded_noto_sans_cjk::naming::FontNaming {
+        let naming = naming::FontNaming {
             family_name: entry.family_name.clone(),
             style_name: entry.style_name.clone(),
             copyright,
             version: config.version.clone(),
         };
-        let converted = std::fs::read(&output).expect("生成したフォントの読み込みに失敗した");
-        let renamed = rounded_noto_sans_cjk::naming::rename(&converted, &naming);
-        std::fs::write(&output, renamed).expect("改名したフォントの書き込みに失敗した");
+        let converted = fs::read(&output).expect("生成したフォントの読み込みに失敗した");
+        let renamed = naming::rename(&converted, &naming);
+        fs::write(&output, renamed).expect("改名したフォントの書き込みに失敗した");
     }
 }

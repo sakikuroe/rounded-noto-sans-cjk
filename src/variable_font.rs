@@ -12,19 +12,18 @@
 use std::io::Write;
 
 use read_fonts::TableProvider;
-use write_fonts::FontBuilder;
 use write_fonts::ps::cff::v2;
-use write_fonts::tables::{avar, fvar, variations};
-use write_fonts::types::{F2Dot14, Fixed, NameId, Tag};
+use write_fonts::tables::{avar, fvar, name, variations};
+use write_fonts::types;
 
 /// 新設する可変軸のタグである。既存のどの登録済み軸タグとも重複しない
 /// 4 文字のタグを独自に定義する。
-const ROUNDNESS_AXIS_TAG: Tag = Tag::new(b"ROND");
+const ROUNDNESS_AXIS_TAG: types::Tag = types::Tag::new(b"ROND");
 
 /// `ROND` 軸の表示名として `name` テーブルに登録する nameID である。
 /// 標準の nameID (0〜25) と衝突しない、フォント固有の名前用に予約された
 /// 範囲 (256〜32767) から選んでいる。
-const ROUNDNESS_AXIS_NAME_ID: NameId = NameId::new(256);
+const ROUNDNESS_AXIS_NAME_ID: types::NameId = types::NameId::new(256);
 
 /// `ROUNDNESS_AXIS_NAME_ID` に対応する、ROND 軸の表示名の文字列である。
 const ROUNDNESS_AXIS_NAME: &str = "Roundness";
@@ -35,13 +34,13 @@ const ROUNDNESS_AXIS_NAME: &str = "Roundness";
 /// であり、`CFF2` に置き換えるため元のバイト列を引き継がない。`fvar`・
 /// `avar` は本モジュールが新たに組み立てるため、元のフォントに同名の
 /// テーブルが存在してもそちらを使う。
-const EXCLUDED_TABLE_TAGS: [Tag; 6] = [
-    Tag::new(b"CFF "),
-    Tag::new(b"CFF2"),
-    Tag::new(b"glyf"),
-    Tag::new(b"loca"),
-    Tag::new(b"fvar"),
-    Tag::new(b"avar"),
+const EXCLUDED_TABLE_TAGS: [types::Tag; 6] = [
+    types::Tag::new(b"CFF "),
+    types::Tag::new(b"CFF2"),
+    types::Tag::new(b"glyf"),
+    types::Tag::new(b"loca"),
+    types::Tag::new(b"fvar"),
+    types::Tag::new(b"avar"),
 ];
 
 /// `build_variable_font` の最終出力から除外するタグの一覧である。
@@ -50,14 +49,14 @@ const EXCLUDED_TABLE_TAGS: [Tag; 6] = [
 /// は ROND 軸の表示名レコードを追加した `name` テーブルを
 /// `build_name_table_with_axis_name` で組み立て直すため、元のフォントの
 /// `name` テーブルをそのまま引き継いではならない。
-const VARIABLE_FONT_EXCLUDED_TABLE_TAGS: [Tag; 7] = [
-    Tag::new(b"CFF "),
-    Tag::new(b"CFF2"),
-    Tag::new(b"glyf"),
-    Tag::new(b"loca"),
-    Tag::new(b"fvar"),
-    Tag::new(b"avar"),
-    Tag::new(b"name"),
+const VARIABLE_FONT_EXCLUDED_TABLE_TAGS: [types::Tag; 7] = [
+    types::Tag::new(b"CFF "),
+    types::Tag::new(b"CFF2"),
+    types::Tag::new(b"glyf"),
+    types::Tag::new(b"loca"),
+    types::Tag::new(b"fvar"),
+    types::Tag::new(b"avar"),
+    types::Tag::new(b"name"),
 ];
 
 /// 元の静的フォントのバイト列と、丸め前後で対応が取れたグリフの輪郭から、
@@ -159,8 +158,8 @@ pub fn build_variable_font(
 
     let cff2_bytes = build_cff2_table(&charstrings, matrix_scale);
 
-    let mut builder = FontBuilder::new();
-    builder.add_raw(Tag::new(b"CFF2"), cff2_bytes);
+    let mut builder = write_fonts::FontBuilder::new();
+    builder.add_raw(types::Tag::new(b"CFF2"), cff2_bytes);
     builder
         .add_table(&build_fvar())
         .expect("fvar テーブルの組み立てに失敗した");
@@ -282,8 +281,8 @@ pub fn build_static_font(original_font_data: &[u8], rounded_glyphs: &[kurbo::Bez
 
     let cff2_bytes = build_static_cff2_table(&charstrings, matrix_scale);
 
-    let mut builder = FontBuilder::new();
-    builder.add_raw(Tag::new(b"CFF2"), cff2_bytes);
+    let mut builder = write_fonts::FontBuilder::new();
+    builder.add_raw(types::Tag::new(b"CFF2"), cff2_bytes);
 
     // 輪郭関連のテーブル・可変軸関連のテーブルを除いたメタデータは、すべて
     // 元のフォントからそのまま引き継ぐ。fvar・avar を組み立てないため、
@@ -822,7 +821,7 @@ fn push_charstring_number(buf: &mut Vec<u8>, value: f64) {
 /// 使う。
 fn push_charstring_fixed(buf: &mut Vec<u8>, value: f64) {
     buf.push(255);
-    buf.extend_from_slice(&Fixed::from_f64(value).to_bits().to_be_bytes());
+    buf.extend_from_slice(&types::Fixed::from_f64(value).to_bits().to_be_bytes());
 }
 
 /// CFF2 CharString の整数オペランドを、最短の表現で書き出す。
@@ -1183,9 +1182,9 @@ fn build_static_cff2_table(charstrings: &[Vec<u8>], matrix_scale: f64) -> Vec<u8
 /// 組み立てた `ItemVariationStore` を返す。
 fn build_item_variation_store() -> variations::ItemVariationStore {
     let region = variations::VariationRegion::new(vec![variations::RegionAxisCoordinates::new(
-        F2Dot14::from_f64(0.0),
-        F2Dot14::from_f64(1.0),
-        F2Dot14::from_f64(1.0),
+        types::F2Dot14::from_f64(0.0),
+        types::F2Dot14::from_f64(1.0),
+        types::F2Dot14::from_f64(1.0),
     )]);
     let region_list = variations::VariationRegionList::new(1, vec![region]);
     let item_variation_data = variations::ItemVariationData::new(0, 0, vec![0], Vec::new());
@@ -1204,9 +1203,9 @@ fn build_item_variation_store() -> variations::ItemVariationStore {
 fn build_fvar() -> fvar::Fvar {
     let axis = fvar::VariationAxisRecord::new(
         ROUNDNESS_AXIS_TAG,
-        Fixed::from_f64(0.0),
-        Fixed::from_f64(0.0),
-        Fixed::from_f64(1.0),
+        types::Fixed::from_f64(0.0),
+        types::Fixed::from_f64(0.0),
+        types::Fixed::from_f64(1.0),
         0,
         ROUNDNESS_AXIS_NAME_ID,
     );
@@ -1233,9 +1232,7 @@ fn build_fvar() -> fvar::Fvar {
 ///
 /// # Panics
 /// - `font` の `name` テーブルの解析に失敗した場合にパニックする。
-fn build_name_table_with_axis_name(font: &read_fonts::FontRef) -> write_fonts::tables::name::Name {
-    use write_fonts::tables::name::NameRecord;
-
+fn build_name_table_with_axis_name(font: &read_fonts::FontRef) -> name::Name {
     const WINDOWS_PLATFORM_ID: u16 = 3;
     const WINDOWS_ENCODING_ID: u16 = 1;
     const WINDOWS_LANG_ID_EN_US: u16 = 0x0409;
@@ -1249,7 +1246,7 @@ fn build_name_table_with_axis_name(font: &read_fonts::FontRef) -> write_fonts::t
         .iter()
         .filter_map(|record| {
             let value = record.string(string_data).ok()?;
-            Some(NameRecord::new(
+            Some(name::NameRecord::new(
                 record.platform_id(),
                 record.encoding_id(),
                 record.language_id(),
@@ -1257,10 +1254,10 @@ fn build_name_table_with_axis_name(font: &read_fonts::FontRef) -> write_fonts::t
                 value.to_string().into(),
             ))
         })
-        .collect::<Vec<NameRecord>>();
+        .collect::<Vec<name::NameRecord>>();
 
     // ROND 軸の表示名レコードを追加する。
-    records.push(NameRecord::new(
+    records.push(name::NameRecord::new(
         WINDOWS_PLATFORM_ID,
         WINDOWS_ENCODING_ID,
         WINDOWS_LANG_ID_EN_US,
@@ -1273,7 +1270,7 @@ fn build_name_table_with_axis_name(font: &read_fonts::FontRef) -> write_fonts::t
     // いる必要がある。
     records.sort_by_key(|r| (r.platform_id, r.encoding_id, r.language_id, r.name_id));
 
-    write_fonts::tables::name::Name::new(records)
+    name::Name::new(records)
 }
 
 /// ROND 軸 1 つだけを持つ、恒等写像の `avar` テーブルを組み立てる。
@@ -1289,16 +1286,22 @@ fn build_name_table_with_axis_name(font: &read_fonts::FontRef) -> write_fonts::t
 /// 組み立てた `Avar` テーブルを返す。
 fn build_avar() -> avar::Avar {
     let segment_map = avar::SegmentMaps::new(vec![
-        avar::AxisValueMap::new(F2Dot14::from_f64(-1.0), F2Dot14::from_f64(-1.0)),
-        avar::AxisValueMap::new(F2Dot14::from_f64(0.0), F2Dot14::from_f64(0.0)),
-        avar::AxisValueMap::new(F2Dot14::from_f64(1.0), F2Dot14::from_f64(1.0)),
+        avar::AxisValueMap::new(
+            types::F2Dot14::from_f64(-1.0),
+            types::F2Dot14::from_f64(-1.0),
+        ),
+        avar::AxisValueMap::new(types::F2Dot14::from_f64(0.0), types::F2Dot14::from_f64(0.0)),
+        avar::AxisValueMap::new(types::F2Dot14::from_f64(1.0), types::F2Dot14::from_f64(1.0)),
     ]);
     avar::Avar::new(vec![segment_map])
 }
 
 #[cfg(test)]
 mod tests {
-    use super::build_variable_font;
+    use std::panic;
+
+    use read_fonts::types;
+    use skrifa::outline::pen;
 
     mod test_font;
 
@@ -1308,7 +1311,7 @@ mod tests {
     fn starts_with_otto_sfnt_tag() {
         // Arrange
         let (font_data, matched_glyphs) = test_font::build_test_font();
-        let sut = build_variable_font;
+        let sut = super::build_variable_font;
 
         // Act
         let variable_font_data = sut(&font_data, &matched_glyphs);
@@ -1324,10 +1327,10 @@ mod tests {
         // Arrange
         let (font_data, mut matched_glyphs) = test_font::build_test_font();
         matched_glyphs.pop();
-        let sut = build_variable_font;
+        let sut = super::build_variable_font;
 
         // Act
-        let result = std::panic::catch_unwind(|| sut(&font_data, &matched_glyphs));
+        let result = panic::catch_unwind(|| sut(&font_data, &matched_glyphs));
 
         // Assert
         assert!(result.is_err());
@@ -1339,7 +1342,7 @@ mod tests {
     fn fvar_has_single_rond_axis_with_matching_min_and_default() {
         // Arrange
         let (font_data, matched_glyphs) = test_font::build_test_font();
-        let sut = build_variable_font;
+        let sut = super::build_variable_font;
 
         // Act
         let variable_font_data = sut(&font_data, &matched_glyphs);
@@ -1349,7 +1352,7 @@ mod tests {
         let fvar = skrifa::MetadataProvider::axes(&font);
         assert_eq!(1, fvar.len());
         let axis = fvar.get(0).unwrap();
-        assert_eq!(read_fonts::types::Tag::new(b"ROND"), axis.tag());
+        assert_eq!(types::Tag::new(b"ROND"), axis.tag());
         assert_eq!(axis.min_value(), axis.default_value());
         assert_eq!(0.0, axis.min_value());
         assert_eq!(1.0, axis.max_value());
@@ -1362,7 +1365,7 @@ mod tests {
     fn fvar_axis_name_id_resolves_to_an_actual_name_record() {
         // Arrange
         let (font_data, matched_glyphs) = test_font::build_test_font();
-        let sut = build_variable_font;
+        let sut = super::build_variable_font;
 
         // Act
         let variable_font_data = sut(&font_data, &matched_glyphs);
@@ -1385,7 +1388,7 @@ mod tests {
 
         // Arrange
         let (font_data, matched_glyphs) = test_font::build_test_font();
-        let sut = build_variable_font;
+        let sut = super::build_variable_font;
         let original_glyphs = test_font::original_glyph_outlines();
 
         // Act
@@ -1396,9 +1399,7 @@ mod tests {
         let outline_glyphs = skrifa::MetadataProvider::outline_glyphs(&font);
         let rounded_glyphs = matched_glyphs.iter().map(|(_, rounded)| rounded);
         for (gid, (original, rounded)) in original_glyphs.iter().zip(rounded_glyphs).enumerate() {
-            let glyph = outline_glyphs
-                .get(read_fonts::types::GlyphId::new(gid as u32))
-                .unwrap();
+            let glyph = outline_glyphs.get(types::GlyphId::new(gid as u32)).unwrap();
 
             // 軸の最小値 (既定値) では、元の輪郭のバウンディングボックスと
             // 一致するはずである。
@@ -1425,7 +1426,7 @@ mod tests {
 
         // Arrange
         let (font_data, matched_glyphs) = test_font::build_test_font();
-        let variable_font_data = build_variable_font(&font_data, &matched_glyphs);
+        let variable_font_data = super::build_variable_font(&font_data, &matched_glyphs);
         let sut = super::subroutinize;
 
         // Act
@@ -1440,7 +1441,7 @@ mod tests {
         let after_glyphs = skrifa::MetadataProvider::outline_glyphs(&after);
 
         for gid in 0..matched_glyphs.len() as u32 {
-            let glyph_id = read_fonts::types::GlyphId::new(gid);
+            let glyph_id = types::GlyphId::new(gid);
             let before_glyph = before_glyphs.get(glyph_id).unwrap();
             let after_glyph = after_glyphs.get(glyph_id).unwrap();
             for coord in [0.0, 1.0] {
@@ -1480,9 +1481,7 @@ mod tests {
 
         let outline_glyphs = skrifa::MetadataProvider::outline_glyphs(&font);
         for (gid, rounded) in rounded_glyphs.iter().enumerate() {
-            let glyph = outline_glyphs
-                .get(read_fonts::types::GlyphId::new(gid as u32))
-                .unwrap();
+            let glyph = outline_glyphs.get(types::GlyphId::new(gid as u32)).unwrap();
             let path = draw_at_coord(&glyph, 0.0);
             assert_bounding_box_close(rounded.bounding_box(), path.bounding_box());
         }
@@ -1492,7 +1491,7 @@ mod tests {
     fn draw_at_coord(glyph: &skrifa::outline::OutlineGlyph, coord: f32) -> kurbo::BezPath {
         let coords = [skrifa::instance::NormalizedCoord::from_f32(coord)];
         let location = skrifa::instance::LocationRef::new(&coords);
-        let mut elements = Vec::<skrifa::outline::pen::PathElement>::new();
+        let mut elements = Vec::<pen::PathElement>::new();
         glyph
             .draw(
                 (skrifa::instance::Size::unscaled(), location),
@@ -1506,25 +1505,23 @@ mod tests {
     ///
     /// テスト内で描画結果を検証しやすくするためだけの変換であり、本体側
     /// (`outline::extract_glyphs`) が内部で行っている変換とは独立している。
-    fn path_elements_to_bez_path(elements: &[skrifa::outline::pen::PathElement]) -> kurbo::BezPath {
-        use skrifa::outline::pen::PathElement;
-
+    fn path_elements_to_bez_path(elements: &[pen::PathElement]) -> kurbo::BezPath {
         let mut path = kurbo::BezPath::new();
         for element in elements {
             match *element {
-                PathElement::MoveTo { x, y } => {
+                pen::PathElement::MoveTo { x, y } => {
                     path.move_to(kurbo::Point::new(f64::from(x), f64::from(y)));
                 }
-                PathElement::LineTo { x, y } => {
+                pen::PathElement::LineTo { x, y } => {
                     path.line_to(kurbo::Point::new(f64::from(x), f64::from(y)));
                 }
-                PathElement::QuadTo { cx0, cy0, x, y } => {
+                pen::PathElement::QuadTo { cx0, cy0, x, y } => {
                     path.quad_to(
                         kurbo::Point::new(f64::from(cx0), f64::from(cy0)),
                         kurbo::Point::new(f64::from(x), f64::from(y)),
                     );
                 }
-                PathElement::CurveTo {
+                pen::PathElement::CurveTo {
                     cx0,
                     cy0,
                     cx1,
@@ -1538,7 +1535,7 @@ mod tests {
                         kurbo::Point::new(f64::from(x), f64::from(y)),
                     );
                 }
-                PathElement::Close => path.close_path(),
+                pen::PathElement::Close => path.close_path(),
             }
         }
         path

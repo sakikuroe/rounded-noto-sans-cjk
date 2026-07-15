@@ -6,11 +6,10 @@
 //! ソースコードに埋め込まず、この TOML 設定ファイル (`fonts.toml`) に
 //! 一元化して管理する。
 
-use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::{fs, path};
 
 /// 生成する 1 つのフォントの設定である。
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 pub struct FontEntry {
     /// この設定を人間が識別するための名前である。生成処理には使わない。
     pub name: String,
@@ -60,7 +59,7 @@ pub struct FontEntry {
 }
 
 /// フォント生成設定ファイル全体である。
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 pub struct Config {
     /// `FontEntry::source`・`FontEntry::output` の基準となるディレクトリ
     /// である。設定ファイル自身の位置ではなく、実行時のカレント
@@ -89,38 +88,37 @@ impl Config {
     /// - `path` が読み込めない場合にパニックする。
     /// - ファイルの内容が `Config` として解析できない (必須フィールドの
     ///   欠落や型の不一致など) 場合にパニックする。
-    pub fn load(path: &Path) -> Self {
-        let text = std::fs::read_to_string(path).expect("設定ファイルの読み込みに失敗した");
+    pub fn load(path: &path::Path) -> Self {
+        let text = fs::read_to_string(path).expect("設定ファイルの読み込みに失敗した");
         toml::from_str(&text).expect("設定ファイルの解析に失敗した")
     }
 
     /// `entry` の変換元ファイルへの、実行時のカレントディレクトリからの
     /// 相対パスを返す。
-    pub fn source_path(&self, entry: &FontEntry) -> PathBuf {
-        Path::new(&self.fonts_dir).join(&entry.source)
+    pub fn source_path(&self, entry: &FontEntry) -> path::PathBuf {
+        path::Path::new(&self.fonts_dir).join(&entry.source)
     }
 
     /// `entry` の変換結果を書き出すファイルへの、実行時のカレント
     /// ディレクトリからの相対パスを返す。
-    pub fn output_path(&self, entry: &FontEntry) -> PathBuf {
-        Path::new(&self.fonts_dir).join(&entry.output)
+    pub fn output_path(&self, entry: &FontEntry) -> path::PathBuf {
+        path::Path::new(&self.fonts_dir).join(&entry.output)
     }
 
     /// `entry.ascii_source` が `Some` の場合、その ASCII 差し替え元
     /// ファイルへの、実行時のカレントディレクトリからの相対パスを返す。
-    pub fn ascii_source_path(&self, entry: &FontEntry) -> Option<PathBuf> {
+    pub fn ascii_source_path(&self, entry: &FontEntry) -> Option<path::PathBuf> {
         entry
             .ascii_source
             .as_ref()
-            .map(|ascii_source| Path::new(&self.fonts_dir).join(ascii_source))
+            .map(|ascii_source| path::Path::new(&self.fonts_dir).join(ascii_source))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
     use std::io::Write;
-    use std::path::Path;
+    use std::path;
 
     /// ASCII 差し替えの有無それぞれ 1 エントリーずつを含む、テスト用の
     /// 設定ファイルの内容である。
@@ -168,7 +166,7 @@ style_name = "Regular"
     fn load_parses_fonts_dir_and_entries() {
         // Arrange
         let file = write_config_file();
-        let sut = Config::load;
+        let sut = super::Config::load;
 
         // Act
         let config = sut(file.path());
@@ -204,7 +202,7 @@ style_name = "Regular"
         let text = format!("version = \"Version 2.000\"\n{CONFIG_TEXT}");
         file.write_all(text.as_bytes())
             .expect("一時ファイルへの書き込みに失敗した");
-        let sut = Config::load;
+        let sut = super::Config::load;
 
         // Act
         let config = sut(file.path());
@@ -220,7 +218,7 @@ style_name = "Regular"
     fn path_helpers_join_fonts_dir_with_file_names() {
         // Arrange
         let file = write_config_file();
-        let sut = Config::load(file.path());
+        let sut = super::Config::load(file.path());
 
         // Act
         let source = sut.source_path(&sut.fonts[0]);
@@ -229,11 +227,11 @@ style_name = "Regular"
         let ascii = sut.ascii_source_path(&sut.fonts[1]);
 
         // Assert
-        assert_eq!(Path::new("fonts/NotoSansCJKjp-Regular.otf"), source);
-        assert_eq!(Path::new("fonts/sans-regular-out.otf"), output);
+        assert_eq!(path::Path::new("fonts/NotoSansCJKjp-Regular.otf"), source);
+        assert_eq!(path::Path::new("fonts/sans-regular-out.otf"), output);
         assert_eq!(None, no_ascii);
         assert_eq!(
-            Some(Path::new("fonts/SourceCodePro.otf").to_path_buf()),
+            Some(path::Path::new("fonts/SourceCodePro.otf").to_path_buf()),
             ascii
         );
     }
@@ -243,10 +241,10 @@ style_name = "Regular"
     #[should_panic]
     fn load_panics_on_missing_file() {
         // Arrange
-        let sut = Config::load;
+        let sut = super::Config::load;
 
         // Act
-        sut(Path::new("this-file-does-not-exist.toml"));
+        sut(path::Path::new("this-file-does-not-exist.toml"));
 
         // Assert: #[should_panic] により、Act がパニックすることをもって検証する。
     }
@@ -270,7 +268,7 @@ rond = 0.85
 "#;
         file.write_all(broken.as_bytes())
             .expect("一時ファイルへの書き込みに失敗した");
-        let sut = Config::load;
+        let sut = super::Config::load;
 
         // Act
         sut(file.path());

@@ -2,8 +2,7 @@
 //! 機能を提供するモジュールである。
 
 use skrifa::{
-    MetadataProvider, font,
-    instance::{LocationRef, Size},
+    MetadataProvider, font, instance,
     outline::{self, OutlinePen},
     raw::{TableProvider, types},
 };
@@ -55,8 +54,8 @@ impl OutlinePen for BezPathPen {
 /// 各グリフの輪郭は skrifa の輪郭描画 (グリフの各セグメントを訪れるペン) を
 /// 使って構築するため、単純グリフだけでなく複合グリフ (コンポーネント参照を
 /// 持つグリフ) についても、参照先の輪郭を変換行列で変換したうえで展開し、
-/// 単一の `BezPath` として返す。半角スペースなど、輪郭を持たないグリフは、
-/// 結果から省略されることなく、要素数 0 の空の `BezPath` として含まれる。
+/// 単一の `kurbo::BezPath` として返す。半角スペースなど、輪郭を持たないグリフは、
+/// 結果から省略されることなく、要素数 0 の空の `kurbo::BezPath` として含まれる。
 ///
 /// # Args
 /// - `font_data` - 読み込み対象のフォントファイルの内容をそのまま格納した
@@ -100,7 +99,7 @@ pub fn extract_glyphs(font_data: &[u8]) -> Vec<kurbo::BezPath> {
     // 意識せずに扱える。
     let outline_glyphs = font.outline_glyphs();
 
-    // グリフ ID の昇順 (0, 1, 2, ...) に、各グリフの輪郭を BezPath へ変換
+    // グリフ ID の昇順 (0, 1, 2, ...) に、各グリフの輪郭を kurbo::BezPath へ変換
     // していく。
     (0..glyph_count)
         .map(|gid| {
@@ -116,8 +115,10 @@ pub fn extract_glyphs(font_data: &[u8]) -> Vec<kurbo::BezPath> {
             // 拡大縮小やヒンティングを行わず、フォント設計単位のままの輪郭を
             // 得るための描画設定。グリフごとに同一の内容 (単位系・原点) で
             // 生成するため、同じ `font_data` から常に同じ結果が得られる。
-            let settings =
-                outline::DrawSettings::unhinted(Size::unscaled(), LocationRef::default());
+            let settings = outline::DrawSettings::unhinted(
+                instance::Size::unscaled(),
+                instance::LocationRef::default(),
+            );
 
             // 単純グリフ・複合グリフを問わず、輪郭の各セグメントがペンへ
             // コールバックされる。複合グリフの場合、参照先の輪郭へ変換行列を
@@ -135,23 +136,17 @@ pub fn extract_glyphs(font_data: &[u8]) -> Vec<kurbo::BezPath> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_glyphs;
-    use kurbo::{BezPath, Shape};
-    use write_fonts::tables::{
-        glyf::{Anchor, Component, ComponentFlags, CompositeGlyph, GlyfLocaBuilder, Glyph},
-        head::Head,
-        hhea::Hhea,
-        hmtx::{Hmtx, LongMetric},
-        maxp::Maxp,
-    };
+    use kurbo::Shape;
+    use write_fonts::tables::{glyf, head, hhea, hmtx, loca, maxp};
+    use write_fonts::types;
 
     /// テストで使う三角形の輪郭。
     ///
     /// 直線分のみで構成し、on-curve 点だけを使うため、TrueType のグリフ
     /// フォーマットへ変換しても座標がそのまま保たれ、`extract_glyphs` の
     /// 結果と入力を直接比較できる。
-    fn triangle() -> BezPath {
-        let mut path = BezPath::new();
+    fn triangle() -> kurbo::BezPath {
+        let mut path = kurbo::BezPath::new();
         path.move_to((0.0, 0.0));
         path.line_to((0.0, 700.0));
         path.line_to((600.0, 700.0));
@@ -163,8 +158,8 @@ mod tests {
     ///
     /// 制御点を off-curve 点として明示的に配置しているため曖昧さがなく、
     /// TrueType へ変換しても同じ `quad_to` セグメントとして復元される。
-    fn lens() -> BezPath {
-        let mut path = BezPath::new();
+    fn lens() -> kurbo::BezPath {
+        let mut path = kurbo::BezPath::new();
         path.move_to((0.0, 0.0));
         path.quad_to((300.0, 700.0), (600.0, 0.0));
         path.quad_to((300.0, -700.0), (0.0, 0.0));
@@ -188,7 +183,7 @@ mod tests {
     /// である。
     /// - `write-fonts` (0.50.0) には、`CFF`/`CFF2` テーブルそのものを組み立
     ///   てる高水準な builder が存在しない (`glyf`/`loca` 用の
-    ///   `GlyfLocaBuilder` のような対応物がない)。低水準な生成コード
+    ///   `glyf::GlyfLocaBuilder` のような対応物がない)。低水準な生成コード
     ///   (`generated_cff.rs` 等) はヘッダーや charset、FDSelect といった
     ///   断片を提供するのみで、Top DICT のオフセット計算や Type2
     ///   charstring のエンコードなどを自前で行わない限り、有効な CFF
@@ -199,41 +194,39 @@ mod tests {
     ///   クレートへの依存が (意図的に) 追加されていない。
     fn build_test_font() -> Vec<u8> {
         // gid 0: 輪郭を持たない空グリフ。半角スペースなどを模している。
-        let empty_glyph = Glyph::Empty;
+        let empty_glyph = glyf::Glyph::Empty;
 
         // gid 1, gid 2: 単純グリフ。
         let triangle_path = triangle();
         let lens_path = lens();
-        let triangle_glyph = Glyph::Simple(
-            write_fonts::tables::glyf::SimpleGlyph::from_bezpath(&triangle_path).unwrap(),
-        );
-        let lens_glyph = Glyph::Simple(
-            write_fonts::tables::glyf::SimpleGlyph::from_bezpath(&lens_path).unwrap(),
-        );
+        let triangle_glyph =
+            glyf::Glyph::Simple(glyf::SimpleGlyph::from_bezpath(&triangle_path).unwrap());
+        let lens_glyph = glyf::Glyph::Simple(glyf::SimpleGlyph::from_bezpath(&lens_path).unwrap());
 
         // gid 3: gid 1 と gid 2 を、それぞれ異なる平行移動量で参照する
         // 複合グリフ。参照先の輪郭に変換 (ここでは平行移動) を適用して
         // 展開したうえで、1 つの輪郭として返されることを検証するために
         // 用意する。
-        let component1 = Component::new(
-            write_fonts::types::GlyphId16::new(1),
-            Anchor::Offset { x: 1000, y: 0 },
+        let component1 = glyf::Component::new(
+            types::GlyphId16::new(1),
+            glyf::Anchor::Offset { x: 1000, y: 0 },
             Default::default(),
-            ComponentFlags::default(),
+            glyf::ComponentFlags::default(),
         );
-        let component2 = Component::new(
-            write_fonts::types::GlyphId16::new(2),
-            Anchor::Offset { x: -500, y: 200 },
+        let component2 = glyf::Component::new(
+            types::GlyphId16::new(2),
+            glyf::Anchor::Offset { x: -500, y: 200 },
             Default::default(),
-            ComponentFlags::default(),
+            glyf::ComponentFlags::default(),
         );
-        let mut composite_glyph = CompositeGlyph::new(component1, triangle_path.bounding_box());
+        let mut composite_glyph =
+            glyf::CompositeGlyph::new(component1, triangle_path.bounding_box());
         composite_glyph.add_component(component2, lens_path.bounding_box());
-        let composite_glyph = Glyph::Composite(composite_glyph);
+        let composite_glyph = glyf::Glyph::Composite(composite_glyph);
 
         // glyf/loca テーブルを組み立てる。グリフの並び順がそのままグリフ
         // ID (0, 1, 2, 3) に対応する。
-        let mut builder = GlyfLocaBuilder::new();
+        let mut builder = glyf::GlyfLocaBuilder::new();
         builder
             .add_glyph(&empty_glyph)
             .unwrap()
@@ -249,25 +242,25 @@ mod tests {
 
         // グリフの輪郭抽出のみに関心があるため、head/hhea/hmtx/maxp は
         // `glyf`/`loca` の読み込みに必要な最小限の値のみを設定する。
-        let head = Head {
+        let head = head::Head {
             units_per_em: 1000,
             index_to_loc_format: match loca_format {
-                write_fonts::tables::loca::LocaFormat::Short => 0,
-                write_fonts::tables::loca::LocaFormat::Long => 1,
+                loca::LocaFormat::Short => 0,
+                loca::LocaFormat::Long => 1,
             },
             ..Default::default()
         };
-        let hhea = Hhea {
+        let hhea = hhea::Hhea {
             number_of_h_metrics: GLYPH_COUNT,
             ..Default::default()
         };
-        let maxp = Maxp {
+        let maxp = maxp::Maxp {
             num_glyphs: GLYPH_COUNT,
             ..Default::default()
         };
-        let hmtx = Hmtx {
+        let hmtx = hmtx::Hmtx {
             h_metrics: (0..GLYPH_COUNT)
-                .map(|_| LongMetric {
+                .map(|_| hmtx::LongMetric {
                     advance: 1000,
                     side_bearing: 0,
                 })
@@ -297,7 +290,7 @@ mod tests {
     fn returns_a_path_per_glyph_in_maxp_order() {
         // Arrange
         let font_data = build_test_font();
-        let sut = extract_glyphs;
+        let sut = super::extract_glyphs;
 
         // Act
         let glyphs = sut(&font_data);
@@ -307,12 +300,12 @@ mod tests {
     }
 
     // シナリオ: 輪郭を持たないグリフ (gid 0) は、省略されず要素数 0 の
-    // 空の BezPath として結果に含まれる。
+    // 空の kurbo::BezPath として結果に含まれる。
     #[test]
     fn glyph_without_outline_is_kept_as_empty_bezpath() {
         // Arrange
         let font_data = build_test_font();
-        let sut = extract_glyphs;
+        let sut = super::extract_glyphs;
 
         // Act
         let glyphs = sut(&font_data);
@@ -326,7 +319,7 @@ mod tests {
     fn simple_glyph_outline_is_extracted_as_is() {
         // Arrange
         let font_data = build_test_font();
-        let sut = extract_glyphs;
+        let sut = super::extract_glyphs;
 
         // Act
         let glyphs = sut(&font_data);
@@ -346,13 +339,13 @@ mod tests {
     fn composite_glyph_outline_is_expanded_with_component_transforms() {
         // Arrange
         let font_data = build_test_font();
-        let sut = extract_glyphs;
+        let sut = super::extract_glyphs;
 
         // Act
         let glyphs = sut(&font_data);
 
         // Assert
-        let mut expected = BezPath::new();
+        let mut expected = kurbo::BezPath::new();
         for element in triangle().path_elements(0.1) {
             expected.push(kurbo::Affine::translate((1000.0, 0.0)) * element);
         }
@@ -368,7 +361,7 @@ mod tests {
     fn extract_glyphs_is_deterministic() {
         // Arrange
         let font_data = build_test_font();
-        let sut = extract_glyphs;
+        let sut = super::extract_glyphs;
 
         // Act
         let first = sut(&font_data);
@@ -385,7 +378,7 @@ mod tests {
     fn panics_on_malformed_font_data() {
         // Arrange
         let font_data = [0_u8, 1, 2, 3];
-        let sut = extract_glyphs;
+        let sut = super::extract_glyphs;
 
         // Act
         sut(&font_data);
@@ -400,7 +393,7 @@ mod tests {
     fn panics_on_empty_input() {
         // Arrange
         let font_data: [u8; 0] = [];
-        let sut = extract_glyphs;
+        let sut = super::extract_glyphs;
 
         // Act
         sut(&font_data);

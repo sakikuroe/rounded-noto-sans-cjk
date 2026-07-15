@@ -860,11 +860,8 @@ fn lerp_path_el(original: kurbo::PathEl, rounded: kurbo::PathEl, t: f64) -> kurb
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        RoundError, corner_radius, lerp_matched_paths, round_path, round_path_matched,
-        tangent_angle,
-    };
     use kurbo::{ParamCurveArclen, ParamCurveNearest, Shape};
+    use std::panic;
 
     /// `PathEl` の「種類」だけを比較するための判別子を返す。
     ///
@@ -886,7 +883,7 @@ mod tests {
     #[test]
     fn tangent_angle_signs_and_scale_invariance() {
         // Arrange
-        let sut = tangent_angle;
+        let sut = super::tangent_angle;
 
         // Act
         let straight = sut(kurbo::Vec2::new(1.0, 0.0), kurbo::Vec2::new(3.0, 0.0));
@@ -914,7 +911,7 @@ mod tests {
     #[test]
     fn corner_radius_matches_formula_by_angle_sign() {
         // Arrange
-        let sut = corner_radius;
+        let sut = super::corner_radius;
         let angle = std::f64::consts::FRAC_PI_2;
         let near_pi = std::f64::consts::PI - 1e-3;
 
@@ -948,7 +945,7 @@ mod tests {
     fn round_path_with_zero_radius_is_identity() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let sut = round_path;
+        let sut = super::round_path;
 
         // Act
         let rounded = sut(&square, 0.0, 0.0).unwrap();
@@ -963,7 +960,7 @@ mod tests {
     fn round_path_rejects_invalid_radii() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let sut = round_path;
+        let sut = super::round_path;
 
         // Act
         let negative_base = sut(&square, -1.0, 5.0);
@@ -972,10 +969,10 @@ mod tests {
         let infinite_inner = sut(&square, 5.0, f64::INFINITY);
 
         // Assert
-        assert_eq!(Err(RoundError::InvalidBaseRadius), negative_base);
-        assert_eq!(Err(RoundError::InvalidInnerRadius), negative_inner);
-        assert_eq!(Err(RoundError::InvalidBaseRadius), nan_base);
-        assert_eq!(Err(RoundError::InvalidInnerRadius), infinite_inner);
+        assert_eq!(Err(super::RoundError::InvalidBaseRadius), negative_base);
+        assert_eq!(Err(super::RoundError::InvalidInnerRadius), negative_inner);
+        assert_eq!(Err(super::RoundError::InvalidBaseRadius), nan_base);
+        assert_eq!(Err(super::RoundError::InvalidInnerRadius), infinite_inner);
     }
 
     // シナリオ: 正方形を適度な半径で丸めると、外接矩形は変わらず (角が
@@ -985,7 +982,7 @@ mod tests {
     fn round_path_square_keeps_edge_midpoints_and_bounding_box() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let sut = round_path;
+        let sut = super::round_path;
 
         // Act
         let rounded = sut(&square, 20.0, 5.0).unwrap();
@@ -1026,7 +1023,7 @@ mod tests {
         // 反時計回り (外郭) の L 字型で、(50, 50) が内側にへこむ凹角になる。
         let l_shape =
             kurbo::BezPath::from_svg("M0 0 L100 0 L100 50 L50 50 L50 100 L0 100 Z").unwrap();
-        let sut = round_path;
+        let sut = super::round_path;
 
         // Act
         let rounded = sut(&l_shape, 20.0, 5.0).unwrap();
@@ -1054,7 +1051,7 @@ mod tests {
         // 一辺 20 の正方形に対し、半径 100 は明らかに辺の長さを超えており、
         // 自動調整なしでは隣り合う丸め弧が重なってしまう。
         let small_square = kurbo::BezPath::from_svg("M0 0 L20 0 L20 20 L0 20 Z").unwrap();
-        let sut = round_path;
+        let sut = super::round_path;
 
         // Act
         let rounded = sut(&small_square, 100.0, 5.0).unwrap();
@@ -1085,7 +1082,7 @@ mod tests {
         let two_squares =
             kurbo::BezPath::from_svg("M0 0 L10 0 L10 10 L0 10 Z M20 0 L30 0 L30 10 L20 10 Z")
                 .unwrap();
-        let sut = round_path;
+        let sut = super::round_path;
         let count_subpaths = |path: &kurbo::BezPath| {
             path.elements()
                 .iter()
@@ -1112,7 +1109,7 @@ mod tests {
     fn round_path_matched_returns_structurally_matching_pair() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let sut = round_path_matched;
+        let sut = super::round_path_matched;
 
         // Act
         let (original, rounded) = sut(&square, 20.0, 5.0).unwrap();
@@ -1134,11 +1131,11 @@ mod tests {
     fn round_path_matched_rounded_component_matches_round_path() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let sut = round_path_matched;
+        let sut = super::round_path_matched;
 
         // Act
         let (_, matched_rounded) = sut(&square, 20.0, 5.0).unwrap();
-        let plain_rounded = round_path(&square, 20.0, 5.0).unwrap();
+        let plain_rounded = super::round_path(&square, 20.0, 5.0).unwrap();
 
         // Assert
         assert_eq!(plain_rounded.bounding_box(), matched_rounded.bounding_box());
@@ -1151,7 +1148,7 @@ mod tests {
     fn round_path_matched_original_component_preserves_input_geometry() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let sut = round_path_matched;
+        let sut = super::round_path_matched;
         let perimeter =
             |path: &kurbo::BezPath| path.segments().map(|seg| seg.arclen(1e-9)).sum::<f64>();
 
@@ -1169,15 +1166,15 @@ mod tests {
     fn round_path_matched_rejects_invalid_radii() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let sut = round_path_matched;
+        let sut = super::round_path_matched;
 
         // Act
         let negative_base = sut(&square, -1.0, 5.0);
         let negative_inner = sut(&square, 5.0, -1.0);
 
         // Assert
-        assert_eq!(Err(RoundError::InvalidBaseRadius), negative_base);
-        assert_eq!(Err(RoundError::InvalidInnerRadius), negative_inner);
+        assert_eq!(Err(super::RoundError::InvalidBaseRadius), negative_base);
+        assert_eq!(Err(super::RoundError::InvalidInnerRadius), negative_inner);
     }
 
     // シナリオ: t = 0.0 では丸める前の輪郭 (original) と厳密に一致し、
@@ -1186,8 +1183,8 @@ mod tests {
     fn lerp_matched_paths_at_endpoints_matches_original_and_rounded() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let (original, rounded) = round_path_matched(&square, 20.0, 5.0).unwrap();
-        let sut = lerp_matched_paths;
+        let (original, rounded) = super::round_path_matched(&square, 20.0, 5.0).unwrap();
+        let sut = super::lerp_matched_paths;
 
         // Act
         let at_zero = sut(&original, &rounded, 0.0);
@@ -1204,8 +1201,8 @@ mod tests {
     fn lerp_matched_paths_halfway_averages_coordinates() {
         // Arrange
         let square = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
-        let (original, rounded) = round_path_matched(&square, 20.0, 5.0).unwrap();
-        let sut = lerp_matched_paths;
+        let (original, rounded) = super::round_path_matched(&square, 20.0, 5.0).unwrap();
+        let sut = super::lerp_matched_paths;
 
         // Act
         let halfway = sut(&original, &rounded, 0.5);
@@ -1247,10 +1244,10 @@ mod tests {
         // Arrange
         let original = kurbo::BezPath::from_svg("M0 0 L100 0 Z").unwrap();
         let rounded = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 Z").unwrap();
-        let sut = lerp_matched_paths;
+        let sut = super::lerp_matched_paths;
 
         // Act
-        let result = std::panic::catch_unwind(|| sut(&original, &rounded, 0.5));
+        let result = panic::catch_unwind(|| sut(&original, &rounded, 0.5));
 
         // Assert
         assert!(result.is_err());

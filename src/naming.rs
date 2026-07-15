@@ -11,9 +11,8 @@
 //! ライセンス説明など残すべき他の nameID はそのまま引き継ぐ。
 
 use read_fonts::TableProvider;
-use write_fonts::FontBuilder;
-use write_fonts::tables::name::{Name, NameRecord};
-use write_fonts::types::{NameId, Tag};
+use write_fonts::tables::name;
+use write_fonts::types;
 
 /// name テーブルへ書き込む際に用いる、Windows プラットフォームの
 /// プラットフォーム ID・エンコーディング ID・言語 ID (英語 (米国)) である。
@@ -101,17 +100,20 @@ pub fn rename(font_data: &[u8], naming: &FontNaming) -> Vec<u8> {
     );
     let unique_id = format!("{};rounded-noto-sans-cjk;{postscript_name}", naming.version);
     let overrides = [
-        (NameId::COPYRIGHT_NOTICE, naming.copyright.clone()),
-        (NameId::FAMILY_NAME, naming.family_name.clone()),
-        (NameId::SUBFAMILY_NAME, naming.style_name.clone()),
-        (NameId::UNIQUE_ID, unique_id),
-        (NameId::FULL_NAME, full_name),
-        (NameId::VERSION_STRING, naming.version.clone()),
-        (NameId::POSTSCRIPT_NAME, postscript_name),
-        (NameId::TRADEMARK, TRADEMARK_DISCLAIMER.to_string()),
-        (NameId::TYPOGRAPHIC_FAMILY_NAME, naming.family_name.clone()),
+        (types::NameId::COPYRIGHT_NOTICE, naming.copyright.clone()),
+        (types::NameId::FAMILY_NAME, naming.family_name.clone()),
+        (types::NameId::SUBFAMILY_NAME, naming.style_name.clone()),
+        (types::NameId::UNIQUE_ID, unique_id),
+        (types::NameId::FULL_NAME, full_name),
+        (types::NameId::VERSION_STRING, naming.version.clone()),
+        (types::NameId::POSTSCRIPT_NAME, postscript_name),
+        (types::NameId::TRADEMARK, TRADEMARK_DISCLAIMER.to_string()),
         (
-            NameId::TYPOGRAPHIC_SUBFAMILY_NAME,
+            types::NameId::TYPOGRAPHIC_FAMILY_NAME,
+            naming.family_name.clone(),
+        ),
+        (
+            types::NameId::TYPOGRAPHIC_SUBFAMILY_NAME,
             naming.style_name.clone(),
         ),
     ];
@@ -119,7 +121,10 @@ pub fn rename(font_data: &[u8], naming: &FontNaming) -> Vec<u8> {
     // 上書き対象の nameID のみを集めておき、元のレコードのうち上書き対象で
     // ない (デザイナー名・URL・ライセンス説明などの) レコードだけを、
     // あとで引き継げるようにする。
-    let overridden_ids = overrides.iter().map(|(id, _)| *id).collect::<Vec<NameId>>();
+    let overridden_ids = overrides
+        .iter()
+        .map(|(id, _)| *id)
+        .collect::<Vec<types::NameId>>();
 
     let mut records = Vec::new();
     for record in original_name.name_record() {
@@ -136,7 +141,7 @@ pub fn rename(font_data: &[u8], naming: &FontNaming) -> Vec<u8> {
         let Ok(value) = record.string(string_data) else {
             continue;
         };
-        records.push(NameRecord::new(
+        records.push(name::NameRecord::new(
             WINDOWS_PLATFORM_ID,
             WINDOWS_ENCODING_ID,
             WINDOWS_LANG_ID_EN_US,
@@ -145,7 +150,7 @@ pub fn rename(font_data: &[u8], naming: &FontNaming) -> Vec<u8> {
         ));
     }
     for (name_id, value) in overrides {
-        records.push(NameRecord::new(
+        records.push(name::NameRecord::new(
             WINDOWS_PLATFORM_ID,
             WINDOWS_ENCODING_ID,
             WINDOWS_LANG_ID_EN_US,
@@ -159,15 +164,15 @@ pub fn rename(font_data: &[u8], naming: &FontNaming) -> Vec<u8> {
     // すべて共通なので、実質的には nameID だけで比較すればよい。
     records.sort_by_key(|r| r.name_id);
 
-    let mut builder = FontBuilder::new();
+    let mut builder = write_fonts::FontBuilder::new();
     builder
-        .add_table(&Name::new(records))
+        .add_table(&name::Name::new(records))
         .expect("name テーブルの組み立てに失敗した");
 
     // name 以外のテーブルは、すべて元のフォントからそのまま引き継ぐ。
     for table_record in font.table_directory().table_records() {
         let tag = table_record.tag();
-        if tag == Tag::new(b"name") {
+        if tag == types::Tag::new(b"name") {
             continue;
         }
         if let Some(data) = font.table_data(tag) {
@@ -180,7 +185,7 @@ pub fn rename(font_data: &[u8], naming: &FontNaming) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FontNaming, rename};
+    use write_fonts::types;
 
     /// テストで書き換える対象の、最小限の name テーブルを持つフォントの
     /// バイト列を組み立てる。
@@ -189,11 +194,10 @@ mod tests {
     /// デザイナー名・著作権表示を持つ最小限のフォントを用意し、`rename`
     /// による書き換えの前後を比較できるようにする。
     fn build_source_font() -> Vec<u8> {
-        use write_fonts::FontBuilder;
         use write_fonts::tables::{head, hhea, hmtx, maxp, name, os2, post};
-        use write_fonts::types::NameId;
+        use write_fonts::types;
 
-        let mut builder = FontBuilder::new();
+        let mut builder = write_fonts::FontBuilder::new();
 
         let head = head::Head {
             units_per_em: 1000,
@@ -224,14 +228,17 @@ mod tests {
         // 上書き対象 (ファミリー名・著作権表示) と、引き継がれるべき対象
         // (デザイナー名) の両方を含む、元の name テーブルを用意する。
         let name_records = [
-            (NameId::COPYRIGHT_NOTICE, "© Original Copyright Holder."),
-            (NameId::FAMILY_NAME, "Original Font Name"),
-            (NameId::SUBFAMILY_NAME, "Regular"),
-            (NameId::FULL_NAME, "Original Font Name"),
-            (NameId::POSTSCRIPT_NAME, "OriginalFontName-Regular"),
-            (NameId::DESIGNER, "Original Designer"),
             (
-                NameId::LICENSE_DESCRIPTION,
+                types::NameId::COPYRIGHT_NOTICE,
+                "© Original Copyright Holder.",
+            ),
+            (types::NameId::FAMILY_NAME, "Original Font Name"),
+            (types::NameId::SUBFAMILY_NAME, "Regular"),
+            (types::NameId::FULL_NAME, "Original Font Name"),
+            (types::NameId::POSTSCRIPT_NAME, "OriginalFontName-Regular"),
+            (types::NameId::DESIGNER, "Original Designer"),
+            (
+                types::NameId::LICENSE_DESCRIPTION,
                 "Licensed under the SIL OFL 1.1",
             ),
         ]
@@ -261,8 +268,8 @@ mod tests {
     }
 
     /// テスト用の `FontNaming` を返す。
-    fn test_naming() -> FontNaming {
-        FontNaming {
+    fn test_naming() -> super::FontNaming {
+        super::FontNaming {
             family_name: "Rounded Test Sans".to_string(),
             style_name: "Regular".to_string(),
             copyright: "Copyright © 2026 Test Author. Portions © Original Copyright Holder."
@@ -273,7 +280,7 @@ mod tests {
 
     /// フォントの英語 (米国) 名レコードから、指定した nameID の文字列を
     /// 取り出す。
-    fn read_name(font_data: &[u8], name_id: write_fonts::types::NameId) -> Option<String> {
+    fn read_name(font_data: &[u8], name_id: types::NameId) -> Option<String> {
         use read_fonts::TableProvider;
 
         let font = read_fonts::FontRef::new(font_data).unwrap();
@@ -298,7 +305,7 @@ mod tests {
         // Arrange
         let font_data = build_source_font();
         let naming = test_naming();
-        let sut = rename;
+        let sut = super::rename;
 
         // Act
         let renamed = sut(&font_data, &naming);
@@ -306,11 +313,11 @@ mod tests {
         // Assert
         assert_eq!(
             Some("Rounded Test Sans".to_string()),
-            read_name(&renamed, write_fonts::types::NameId::FAMILY_NAME)
+            read_name(&renamed, types::NameId::FAMILY_NAME)
         );
         assert_eq!(
             Some("Copyright © 2026 Test Author. Portions © Original Copyright Holder.".to_string()),
-            read_name(&renamed, write_fonts::types::NameId::COPYRIGHT_NOTICE)
+            read_name(&renamed, types::NameId::COPYRIGHT_NOTICE)
         );
     }
 
@@ -321,7 +328,7 @@ mod tests {
         // Arrange
         let font_data = build_source_font();
         let naming = test_naming();
-        let sut = rename;
+        let sut = super::rename;
 
         // Act
         let renamed = sut(&font_data, &naming);
@@ -329,11 +336,11 @@ mod tests {
         // Assert
         assert_eq!(
             Some("Original Designer".to_string()),
-            read_name(&renamed, write_fonts::types::NameId::DESIGNER)
+            read_name(&renamed, types::NameId::DESIGNER)
         );
         assert_eq!(
             Some("Licensed under the SIL OFL 1.1".to_string()),
-            read_name(&renamed, write_fonts::types::NameId::LICENSE_DESCRIPTION)
+            read_name(&renamed, types::NameId::LICENSE_DESCRIPTION)
         );
     }
 
@@ -343,14 +350,14 @@ mod tests {
         // Arrange
         let font_data = build_source_font();
         let naming = test_naming();
-        let sut = rename;
+        let sut = super::rename;
 
         // Act
         let renamed = sut(&font_data, &naming);
 
         // Assert
-        let trademark = read_name(&renamed, write_fonts::types::NameId::TRADEMARK)
-            .expect("TRADEMARK レコードが存在しない");
+        let trademark =
+            read_name(&renamed, types::NameId::TRADEMARK).expect("TRADEMARK レコードが存在しない");
         assert!(trademark.contains("not produced, endorsed, or affiliated"));
     }
 
@@ -361,7 +368,7 @@ mod tests {
         // Arrange
         let font_data = build_source_font();
         let naming = test_naming();
-        let sut = rename;
+        let sut = super::rename;
 
         // Act
         let renamed = sut(&font_data, &naming);
@@ -369,7 +376,7 @@ mod tests {
         // Assert
         assert_eq!(
             Some("RoundedTestSans-Regular".to_string()),
-            read_name(&renamed, write_fonts::types::NameId::POSTSCRIPT_NAME)
+            read_name(&renamed, types::NameId::POSTSCRIPT_NAME)
         );
     }
 }
