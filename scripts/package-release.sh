@@ -16,13 +16,22 @@ version=${1:?usage: scripts/package-release.sh <version e.g. 1.0.0>}
     exit 1
 }
 
-# fonts.toml の output と一致させること。
-fonts=(
-    fonts/RoundedNotoSansCJKJP-Regular.otf
-    fonts/RoundedNotoSansCJKJP-Bold.otf
-    fonts/RoundedNotoCodeCJKJP-Regular.otf
-    fonts/RoundedNotoCodeCJKJP-Bold.otf
+# 梱包対象のフォント一覧は fonts.toml の fonts_dir と各エントリーの output
+# から読み取る。ビルド出力の定義を fonts.toml と二重管理すると、設定変更に
+# 本スクリプトが追従できなくなるためである (tomllib は Python 3.11 以上)。
+mapfile -t fonts < <(python3 - <<'PY'
+import tomllib
+
+with open("fonts.toml", "rb") as f:
+    config = tomllib.load(f)
+for font in config["font"]:
+    print(f"{config['fonts_dir']}/{font['output']}")
+PY
 )
+[[ ${#fonts[@]} -gt 0 ]] || {
+    echo "error: fonts.toml から出力フォントの一覧を読み取れない" >&2
+    exit 1
+}
 for f in "${fonts[@]}"; do
     [[ -f $f ]] || { echo "error: $f がない。先に generate を実行すること" >&2; exit 1; }
 done
