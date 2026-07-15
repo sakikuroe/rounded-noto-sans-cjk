@@ -1,6 +1,20 @@
 [package]
-name = "rounded-noto-sans"
+name = "rounded-noto-sans-cjk"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Rounds the outline corners of static OpenType/CFF CJK fonts such as Noto Sans CJK JP, producing soft rounded-corner fonts"
+repository = "https://github.com/sakikuroe/rounded-noto-sans-cjk"
+readme = "README.md"
+authors = ["KUROE Saki"]
+keywords = ["font", "opentype", "cff2", "cjk"]
+categories = ["command-line-utilities"]
 
 [dependencies]
+kurbo = "0.13.1"
+read-fonts = "0.41.0"
+serde = { version = "1", features = ["derive"] }
+skrifa = "0.44.0"
+tempfile = "3.27.0"
+toml = "0.8"
+write-fonts = { version = "0.50.0", features = ["read"] }
