@@ -8,7 +8,7 @@
 # 前処理の手順は README.md (英語版) / README.ja.md (日本語版) を参照。
 
 fonts_dir = "fonts"
-version = "Version 0.100"
+version = "Version 0.101"
 
 [[font]]
 name = "sans-regular"
