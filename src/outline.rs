@@ -48,6 +48,114 @@ impl OutlinePen for BezPathPen {
     }
 }
 
+/// 輪郭の各サブパスで、`ClosePath` 直前の最後の点を `MoveTo` の始点に
+/// 溶接する (座標を完全に一致させる) 距離のしきい値 (フォント設計単位)。
+///
+/// 手動でヒンティング・調整されたフォントでは、本来同一であるべき輪郭の
+/// 開始点と終了点が、整数座標への丸め誤差でわずかにずれて記録されている
+/// ことがある。このズレを放置すると、`round` モジュールがそれを極端に
+/// 短い辺として扱ってしまう。その両端の頂点に通常の丸め半径を適用しようと
+/// した結果、丸め弧が極端に押し潰され、輪郭が自己交差気味に尖ってしまう
+/// 不具合につながるため、抽出の時点で溶接して取り除く。
+///
+/// 値の根拠: ASCII 差し替え元の Source Code Pro (Regular/Bold) 全 ASCII
+/// グリフについて、この継ぎ目のズレを実測したところ、意図せず生じたと
+/// 考えられるズレ (整数座標への丸め誤差) は最大でも 3.162 unit
+/// (`sqrt(3^2 + 1^2)`) だった。一方、この継ぎ目を意図的に長い辺として
+/// 使っている箇所 (`ClosePath` の暗黙の線分をグリフの実際の輪郭の一部と
+/// して使う描画) では、最小でも 24 unit 離れていた。両者の間に位置する
+/// この値であれば、意図しないズレのみを確実に吸収しつつ、意図した長い
+/// 辺を誤って溶接することはない。
+const SEAM_WELD_EPSILON: f64 = 4.0;
+
+/// `PathEl` が描画したあとの現在点 (`ClosePath` を除く) を求める。
+///
+/// # Args
+/// - `el` - 対象の要素であり、`ClosePath` であってはならない。
+///
+/// # Returns
+/// `el` を描画したあとの現在点を返す。
+///
+/// # Panics
+/// - `el` が `ClosePath` である場合にパニックする。
+fn path_el_end(el: &kurbo::PathEl) -> kurbo::Point {
+    match *el {
+        kurbo::PathEl::MoveTo(p)
+        | kurbo::PathEl::LineTo(p)
+        | kurbo::PathEl::QuadTo(_, p)
+        | kurbo::PathEl::CurveTo(_, _, p) => p,
+        kurbo::PathEl::ClosePath => unreachable!("ClosePath has no end point of its own"),
+    }
+}
+
+/// `el` の終点の座標を `new_end` へ書き換える。
+///
+/// # Args
+/// - `el` - 書き換え対象の要素であり、`ClosePath` であってはならない。
+/// - `new_end` - 新しく設定する終点の座標である。
+///
+/// # Panics
+/// - `el` が `ClosePath` である場合にパニックする。
+fn set_path_el_end(el: &mut kurbo::PathEl, new_end: kurbo::Point) {
+    match el {
+        kurbo::PathEl::MoveTo(p)
+        | kurbo::PathEl::LineTo(p)
+        | kurbo::PathEl::QuadTo(_, p)
+        | kurbo::PathEl::CurveTo(_, _, p) => *p = new_end,
+        kurbo::PathEl::ClosePath => unreachable!("ClosePath has no end point of its own"),
+    }
+}
+
+/// 輪郭の各サブパスについて、`ClosePath` 直前の最後の点が `MoveTo` の
+/// 始点と `SEAM_WELD_EPSILON` 以内の近さにある場合に、座標を始点へ完全に
+/// 一致させた (溶接した) 輪郭を返す。
+///
+/// ズレがしきい値を超える場合は、意図した形状である可能性があるため
+/// 変更しない。溶接によって、本来同一の点であるはずの継ぎ目に生じていた
+/// 極小セグメントが消え、以降の丸め処理がその頂点を通常どおりの角として
+/// 扱えるようになる。
+///
+/// # Args
+/// - `path` - 溶接対象の輪郭である。1 個以上の `MoveTo` から始まる
+///   サブパスで構成されている必要がある。
+///
+/// # Returns
+/// 溶接後の輪郭を返す。
+fn weld_seams(path: &kurbo::BezPath) -> kurbo::BezPath {
+    let mut elements = path.elements().to_vec();
+
+    // 直前に見た MoveTo の添字。ClosePath に出会うたびに、この MoveTo の
+    // 始点と直前の要素の終点を比較するために使う。
+    let mut current_move_to_index: Option<usize> = None;
+
+    for i in 0..elements.len() {
+        match elements[i] {
+            kurbo::PathEl::MoveTo(_) => {
+                current_move_to_index = Some(i);
+            }
+            kurbo::PathEl::ClosePath => {
+                // ClosePath 単独のサブパス (直前に描画要素がない) は溶接の
+                // 対象がないため読み飛ばす。
+                let (Some(move_to_index), true) = (current_move_to_index, i > 0) else {
+                    continue;
+                };
+                let kurbo::PathEl::MoveTo(start) = elements[move_to_index] else {
+                    unreachable!("current_move_to_index always points at a MoveTo");
+                };
+
+                let last_index = i - 1;
+                let last_end = path_el_end(&elements[last_index]);
+                if last_end != start && last_end.distance(start) <= SEAM_WELD_EPSILON {
+                    set_path_el_end(&mut elements[last_index], start);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    kurbo::BezPath::from_vec(elements)
+}
+
 /// フォントのバイト列から、フォントに収録されたすべてのグリフの輪郭を
 /// `kurbo::BezPath` として抽出する。
 ///
@@ -56,6 +164,9 @@ impl OutlinePen for BezPathPen {
 /// 持つグリフ) についても、参照先の輪郭を変換行列で変換したうえで展開し、
 /// 単一の `kurbo::BezPath` として返す。半角スペースなど、輪郭を持たないグリフは、
 /// 結果から省略されることなく、要素数 0 の空の `kurbo::BezPath` として含まれる。
+/// また、各サブパスの開始点と終了点が `SEAM_WELD_EPSILON` 以内でわずかに
+/// ずれているだけの場合は、座標を完全に一致させる (溶接する) ため、返される
+/// 輪郭は常に厳密に閉じている。
 ///
 /// # Args
 /// - `font_data` - 読み込み対象のフォントファイルの内容をそのまま格納した
@@ -129,7 +240,8 @@ pub fn extract_glyphs(font_data: &[u8]) -> Vec<kurbo::BezPath> {
                 .draw(settings, &mut pen)
                 .unwrap_or_else(|e| panic!("failed to draw glyph {glyph_id}: {e}"));
 
-            pen.path
+            // 継ぎ目のわずかなズレに起因する極小セグメントを取り除く。
+            weld_seams(&pen.path)
         })
         .collect::<Vec<kurbo::BezPath>>()
 }
@@ -167,10 +279,27 @@ mod tests {
         path
     }
 
+    /// テストで使う、開始点と終了点が 1 unit だけずれた (継ぎ目に隙間の
+    /// ある) 三角形の輪郭。
+    ///
+    /// 手動調整されたフォントで実際に見られる、本来同一であるはずの
+    /// 継ぎ目にわずかなズレが生じているパターンを模している。ズレが
+    /// `SEAM_WELD_EPSILON` 以内であるため、`extract_glyphs` によって
+    /// 溶接され、最後の点は `MoveTo` の始点と厳密に一致するはずである。
+    fn triangle_with_seam_gap() -> kurbo::BezPath {
+        let mut path = kurbo::BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((0.0, 700.0));
+        path.line_to((600.0, 700.0));
+        path.line_to((1.0, 0.0));
+        path.close_path();
+        path
+    }
+
     /// 単純グリフ 2 個 (`triangle`・`lens`) と、それらをコンポーネントとして
-    /// 参照する複合グリフ、および輪郭を持たない空グリフの、合計 4 グリフを
-    /// 収録した最小限の TrueType (`glyf`) OpenType フォントをその場で組み立
-    /// てる。
+    /// 参照する複合グリフ、輪郭を持たない空グリフ、および継ぎ目に隙間の
+    /// ある単純グリフの、合計 5 グリフを収録した最小限の TrueType (`glyf`)
+    /// OpenType フォントをその場で組み立てる。
     ///
     /// `extract_glyphs` の仕様は CFF/CFF2 のアウトラインを持つフォントを
     /// 前提としているが、その実体は skrifa の `outline_glyphs()` /
@@ -203,6 +332,11 @@ mod tests {
             glyf::Glyph::Simple(glyf::SimpleGlyph::from_bezpath(&triangle_path).unwrap());
         let lens_glyph = glyf::Glyph::Simple(glyf::SimpleGlyph::from_bezpath(&lens_path).unwrap());
 
+        // gid 4: 継ぎ目に 1 unit の隙間がある単純グリフ。
+        let seam_gap_path = triangle_with_seam_gap();
+        let seam_gap_glyph =
+            glyf::Glyph::Simple(glyf::SimpleGlyph::from_bezpath(&seam_gap_path).unwrap());
+
         // gid 3: gid 1 と gid 2 を、それぞれ異なる平行移動量で参照する
         // 複合グリフ。参照先の輪郭に変換 (ここでは平行移動) を適用して
         // 展開したうえで、1 つの輪郭として返されることを検証するために
@@ -225,7 +359,7 @@ mod tests {
         let composite_glyph = glyf::Glyph::Composite(composite_glyph);
 
         // glyf/loca テーブルを組み立てる。グリフの並び順がそのままグリフ
-        // ID (0, 1, 2, 3) に対応する。
+        // ID (0, 1, 2, 3, 4) に対応する。
         let mut builder = glyf::GlyfLocaBuilder::new();
         builder
             .add_glyph(&empty_glyph)
@@ -235,10 +369,12 @@ mod tests {
             .add_glyph(&lens_glyph)
             .unwrap()
             .add_glyph(&composite_glyph)
+            .unwrap()
+            .add_glyph(&seam_gap_glyph)
             .unwrap();
         let (glyf, loca, loca_format) = builder.build();
 
-        const GLYPH_COUNT: u16 = 4;
+        const GLYPH_COUNT: u16 = 5;
 
         // グリフの輪郭抽出のみに関心があるため、head/hhea/hmtx/maxp は
         // `glyf`/`loca` の読み込みに必要な最小限の値のみを設定する。
@@ -296,7 +432,7 @@ mod tests {
         let glyphs = sut(&font_data);
 
         // Assert
-        assert_eq!(4, glyphs.len());
+        assert_eq!(5, glyphs.len());
     }
 
     // シナリオ: 輪郭を持たないグリフ (gid 0) は、省略されず要素数 0 の
@@ -353,6 +489,49 @@ mod tests {
             expected.push(kurbo::Affine::translate((-500.0, 200.0)) * element);
         }
         assert_eq!(expected, glyphs[3]);
+    }
+
+    // シナリオ: 開始点と終了点がわずか (SEAM_WELD_EPSILON 以内) にずれた
+    // 輪郭は、終了点が開始点へ溶接され、厳密に閉じた輪郭として返る。
+    #[test]
+    fn seam_gap_within_epsilon_is_welded_to_start_point() {
+        // Arrange
+        let font_data = build_test_font();
+        let sut = super::extract_glyphs;
+
+        // Act
+        let glyphs = sut(&font_data);
+
+        // Assert
+        // 最後の LineTo の終点 (1.0, 0.0) が、MoveTo の始点 (0.0, 0.0) と
+        // 厳密に一致する点まで溶接されているはずである。
+        let mut expected = kurbo::BezPath::new();
+        expected.move_to((0.0, 0.0));
+        expected.line_to((0.0, 700.0));
+        expected.line_to((600.0, 700.0));
+        expected.line_to((0.0, 0.0));
+        expected.close_path();
+        assert_eq!(expected, glyphs[4]);
+    }
+
+    // シナリオ: `weld_seams` は、しきい値を超えて離れた終了点には手を
+    // 加えない。意図した形状である可能性があるためである。
+    #[test]
+    fn weld_seams_leaves_gap_beyond_epsilon_untouched() {
+        // Arrange
+        let mut path = kurbo::BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((0.0, 700.0));
+        path.line_to((600.0, 700.0));
+        path.line_to((super::SEAM_WELD_EPSILON + 1.0, 0.0));
+        path.close_path();
+        let sut = super::weld_seams;
+
+        // Act
+        let welded = sut(&path);
+
+        // Assert
+        assert_eq!(path, welded);
     }
 
     // シナリオ: 同じ入力バイト列を渡した場合、呼び出すたびに常に同じ結果を
