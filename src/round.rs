@@ -248,15 +248,30 @@ fn elevate_to_cubic(seg: kurbo::PathSeg) -> kurbo::CubicBez {
 /// 角の置き換えとして挿入する、円弧を近似する 3 次ベジエを組み立てる。
 ///
 /// 円弧を 3 次ベジエで近似する一般的な手法にならい、それぞれの端点から
-/// 接線方向に、弦の長さに比例した短い制御点を置く。1/3 という係数は、目視で
-/// 滑らかに見える程度の近似精度が得られるよう経験的に選んだものであり、
-/// 真円との一致を保証するものではない。
+/// 接線方向に、弦の長さに比例した制御点を置く。比例係数
+/// (`handle_ratio`) は固定の 1/3 ではなく、始点・終点の接線がなす掃引角
+/// `theta` (`tangent_angle` で求める、`p_from` から `p_to` へ回転する
+/// 角度) に応じて変化させる。
+///
+/// 半径 `R`・掃引角 `theta` の円弧を 1 本の 3 次ベジエで近似する際の
+/// 標準的なハンドル長は `R * 4/3 * tan(theta/4)` である (SVG の弧
+/// コマンドをベジエへ変換する処理などで広く使われる)。円弧の弦の長さが
+/// `L = 2 R sin(theta/2)` であることを使ってこの式を弦長基準の係数に
+/// 書き換えると、`handle_ratio = 1 / (3 cos^2(theta/4))` になる
+/// (`handle_len = L * handle_ratio`)。`theta` が 0 に近い (ほぼ直進する)
+/// 場合はこの係数が固定の 1/3 に一致し、`theta` が π に近づく (180°近く
+/// 鋭く折り返す凸角である) ほど係数が大きくなる。
+///
+/// 固定の 1/3 では、掃引角が大きいほどこの近似が実際の円弧から乖離し、
+/// 半径が辺の長さに対して大きい鋭い凸角 (細い画線の先端など) では、
+/// 制御点が進行方向に対して逆走し、輪郭が自己交差気味に尖ってしまって
+/// いた。掃引角に応じて係数を補正することで、この逆走を防ぐ。
 ///
 /// Resource Han Rounded の `transformContour` (`module/round-font.js`) も、
 /// 頂点近傍を接線方向オフセット付きの制御点を持つ 3 次ベジエに置き換える
 /// という同種の着想を採る。ただしオフセット量の式は異なり (元実装は
-/// `0.5 * 半径`、本実装は `1/3 * 弦長`)、円弧のベジエ近似自体が一般的な
-/// 技法であることから、直接の翻訳ではなく独立した実装と判断している。
+/// `0.5 * 半径` の固定係数)、円弧のベジエ近似自体が一般的な技法である
+/// ことから、直接の翻訳ではなく独立した実装と判断している。
 ///
 /// # Args
 /// - `p_from` - 弧の始点である。
@@ -275,7 +290,6 @@ fn build_round_arc(
     tangent_from: kurbo::Vec2,
     tangent_to: kurbo::Vec2,
 ) -> Option<kurbo::CubicBez> {
-    const HANDLE_RATIO: f64 = 1.0 / 3.0;
     let chord = p_to - p_from;
 
     // 弦の向きすら定義できない (p_from と p_to が一致する) 場合は、挿入
@@ -297,7 +311,11 @@ fn build_round_arc(
         chord
     };
 
-    let handle_len = chord.hypot() * HANDLE_RATIO;
+    // 掃引角の符号は制御点の向きに影響しないため、絶対値のみを使う。
+    let theta = tangent_angle(dir_from, dir_to).abs();
+    let handle_ratio = 1.0 / (3.0 * (theta / 4.0).cos().powi(2));
+
+    let handle_len = chord.hypot() * handle_ratio;
     let c1 = p_from + dir_from.normalize() * handle_len;
     let c2 = p_to - dir_to.normalize() * handle_len;
     Some(kurbo::CubicBez::new(p_from, c1, c2, p_to))
@@ -860,7 +878,7 @@ fn lerp_path_el(original: kurbo::PathEl, rounded: kurbo::PathEl, t: f64) -> kurb
 
 #[cfg(test)]
 mod tests {
-    use kurbo::{ParamCurveArclen, ParamCurveNearest, Shape};
+    use kurbo::{ParamCurve, ParamCurveArclen, ParamCurveNearest, Shape};
     use std::panic;
 
     /// `PathEl` の「種類」だけを比較するための判別子を返す。
@@ -938,6 +956,40 @@ mod tests {
         assert!(convex_near_pi > 39.9);
         // 半径は常に 0 以上になる。
         assert!(non_negative >= 0.0);
+    }
+
+    // シナリオ: 180°に近い鋭い凸角 (細い画線の先端など) を丸める弧でも、
+    // 弦の方向に対して進行が逆走しない。
+    //
+    // Rounded Noto Code の ASCII 差し替えで実際に確認された `<` (U+003C)
+    // の頂点の配置 (掃引角 約132°) を再現している。固定係数 1/3 だった
+    // 頃は、この配置で c1 の y 座標が p_from の y (105.488) をわずかに
+    // 下回り、弦の方向 (+y) に対して手前へ逆走する制御点が生じていた。
+    #[test]
+    fn build_round_arc_does_not_backtrack_for_sharp_corner() {
+        // Arrange
+        let p_from = kurbo::Point::new(350.568, 105.488);
+        let p_to = kurbo::Point::new(412.5, 132.946);
+        let tangent_from = kurbo::Vec2::new(313.3, -283.9);
+        let tangent_to = kurbo::Vec2::new(0.0, 102.1);
+        let chord_dir = (p_to - p_from).normalize();
+        let sut = super::build_round_arc;
+
+        // Act
+        let arc = sut(p_from, p_to, tangent_from, tangent_to).unwrap();
+
+        // Assert: 弧を細かく標本化し、弦方向への射影 (進捗) が単調に
+        // 増加することを確認する。退化した近似では、この射影が途中で
+        // 減少する (=カスプ) ことがあった。
+        let progress = (0..=20)
+            .map(|i| (arc.eval(i as f64 / 20.0) - p_from).dot(chord_dir))
+            .collect::<Vec<f64>>();
+        for window in progress.windows(2) {
+            assert!(
+                window[1] >= window[0] - 1e-9,
+                "arc must not backtrack along the chord direction: {progress:?}"
+            );
+        }
     }
 
     // シナリオ: 半径 0 で丸めた場合、入力と全く同じ輪郭が返る。
