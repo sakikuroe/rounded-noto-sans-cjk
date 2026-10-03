@@ -2,6 +2,7 @@
 name = "rounded-noto-sans-cjk"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 description = "Rounds the outline corners of static OpenType/CFF CJK fonts such as Noto Sans CJK JP, producing soft rounded-corner fonts"
 repository = "https://github.com/sakikuroe/rounded-noto-sans-cjk"
