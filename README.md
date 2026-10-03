@@ -25,8 +25,10 @@ Convex corners are rounded more strongly the sharper they are, while concave cor
 
 ## Requirements
 
+The Code fonts use half-em and full-em cells, with zero-width combining marks. Their width classification, exceptions, and verification commands are documented in [Code cell widths](docs/reference/code-widths.md).
+
 - Rust 1.85+
-- Python 3 with [fontTools](https://github.com/fonttools/fonttools) and [cffsubr](https://github.com/adobe-type-tools/cffsubr) (`cffsubr` must be on `PATH`)
+- Python 3 with the dependencies in `scripts/requirements.txt`, including [fontTools](https://github.com/fonttools/fonttools), Unicode 16.0.0 data, and [cffsubr](https://github.com/adobe-type-tools/cffsubr) (`cffsubr` must be on `PATH`)
 - A few GB of free memory; each font takes several minutes to convert
 
 ## Building the fonts
@@ -36,7 +38,7 @@ Run all commands at the repository root. For license reasons the source fonts ar
 ### 1. Install the Python tools
 
 ```sh
-pip install fonttools cffsubr
+pip install -r scripts/requirements.txt
 ```
 
 ### 2. Download and prepare the source fonts

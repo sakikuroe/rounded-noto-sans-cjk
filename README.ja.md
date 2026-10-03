@@ -25,8 +25,10 @@ Noto Sans CJK JP および Noto Sans Mono CJK JP のすべてのグリフの角�
 
 ## 動作環境
 
+Code フォントは半角・全角を 0.5・1 em に統一し、非間隔の結合文字はゼロ幅にします。分類規則・例外と検証方法は [Code フォントのセル幅](docs/reference/code-widths.md) を参照してください。
+
 - Rust 1.85 以降
-- Python 3 および [fontTools](https://github.com/fonttools/fonttools)・[cffsubr](https://github.com/adobe-type-tools/cffsubr) (`cffsubr` は `PATH` から実行できる必要があります)
+- Python 3 と `scripts/requirements.txt` の依存関係 ([fontTools](https://github.com/fonttools/fonttools)・Unicode 16.0.0 のデータ・[cffsubr](https://github.com/adobe-type-tools/cffsubr) を含み、`cffsubr` は `PATH` から実行できる必要があります)
 - 数 GB の空きメモリ (変換は 1 フォントあたり数分かかり、ピーク時に数 GB のメモリを使用します)
 
 ## フォントのビルド方法
@@ -36,7 +38,7 @@ Noto Sans CJK JP および Noto Sans Mono CJK JP のすべてのグリフの角�
 ### 1. Python ツールのインストール
 
 ```sh
-pip install fonttools cffsubr
+pip install -r scripts/requirements.txt
 ```
 
 ### 2. ソースフォントのダウンロードと前処理

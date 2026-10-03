@@ -26,12 +26,15 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
       - name: Install cffsubr
         # variable_font::tests::subroutinize_preserves_outlines_at_axis_extremes が
         # 外部コマンド cffsubr を要求するため、テスト実行前にインストールする。
-        run: pip install cffsubr
+        run: pip install -r scripts/requirements.txt
+
+      - name: Test Code width normalization
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Check formatting
         run: cargo fmt --check

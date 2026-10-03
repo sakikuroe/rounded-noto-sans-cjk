@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<title>Rounded Noto Code CJK JP — セル幅の確認</title>
+<style>
+@font-face { font-family: RoundedCode; src: url('../fonts/RoundedNotoCodeCJKJP-Regular.otf'); font-weight: 400; }
+@font-face { font-family: RoundedCode; src: url('../fonts/RoundedNotoCodeCJKJP-Bold.otf'); font-weight: 700; }
+body { margin: 32px; background: #f6f7f9; color: #17202a; font-family: sans-serif; }
+pre, .probe { font-family: RoundedCode; font-size: 32px; line-height: 1.5; font-synthesis: none; }
+pre { background: white; padding: 20px; width: fit-content; }
+.bold { font-weight: 700; }
+.probe { position: absolute; visibility: hidden; white-space: pre; }
+</style>
+<h1>Code フォントのセル幅</h1>
+<p>Regular / Bold の枠の位置、結合記号、罫線の接続を確認します。</p>
+<p id="result">フォントを読み込んでいます。</p>
+<h2>Regular</h2>
+<pre id="regular">┌────────┐
+│abc 日本│
+│éΩæ 한  │
+└────────┘
+
+é / é / x́ / æ / Ω / Ж
+が / が / カ / ｶ
+한 / 한 / ᄓᅡᆨ / 한〮 / ᄓᅡᆨ〯
+ㄱ / ﾡ / A / Ａ
+██████████
+▀▀▀▀▀▀▀▀▀▀
+▄▄▄▄▄▄▄▄▄▄
+──────────
+┼┼┼┼┼┼┼┼┼┼</pre>
+<h2>Bold</h2>
+<pre id="bold" class="bold"></pre>
+<script>
+document.querySelector('#bold').textContent = document.querySelector('#regular').textContent;
+(async () => {
+  try {
+    await Promise.all([document.fonts.load('32px RoundedCode'), document.fonts.load('700 32px RoundedCode')]);
+    await document.fonts.ready;
+    const failures = [];
+    for (const weight of [400, 700]) {
+      if (!document.fonts.check(`${weight} 32px RoundedCode`)) failures.push(`${weight}: font unavailable`);
+      for (const [text, expected] of [['AéΩæ─█ﾡ', 112], ['日本', 64], ['é',16], ['é',16],
+                                     ['が',32], ['が',32], ['한',32], ['한',32], ['ᄓᅡᆨ',32],
+                                     ['한〮',32], ['ᄓᅡᆨ〯',32], ['ㄱ',32], ['ﾡ',16],
+                                     ['┌────────┐',160], ['│abc 日本│',160], ['│éΩæ 한  │',160]]) {
+        const probe = document.createElement('span');
+        probe.className = 'probe';
+        probe.style.fontWeight = weight;
+        probe.textContent = text;
+        document.body.append(probe);
+        const actual = probe.getBoundingClientRect().width;
+        probe.remove();
+        if (Math.abs(actual - expected) > 0.1) failures.push(`${weight} ${text}: ${actual} / ${expected}`);
+      }
+    }
+    document.querySelector('#result').textContent = failures.length ? 'FAIL: ' + failures.join('; ') : 'PASS: Regular / Bold のセル幅と結合文字の幅が一致しました。';
+  } catch (error) { document.querySelector('#result').textContent = 'FAIL: ' + error.message; }
+})();
+</script>
+</html>
