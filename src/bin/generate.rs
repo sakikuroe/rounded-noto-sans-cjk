@@ -217,6 +217,7 @@ fn main() {
             style_name: entry.style_name.clone(),
             copyright,
             version: config.version.clone(),
+            weight_class: entry.weight_class,
         };
         let converted = fs::read(&output).expect("生成したフォントの読み込みに失敗した");
         let renamed = naming::rename(&converted, &naming);

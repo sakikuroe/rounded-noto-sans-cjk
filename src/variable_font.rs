@@ -11,9 +11,11 @@
 
 use std::io::Write;
 
+use kurbo::Shape;
 use read_fonts::TableProvider;
+use write_fonts::from_obj::FromTableRef;
 use write_fonts::ps::cff::v2;
-use write_fonts::tables::{avar, fvar, name, variations};
+use write_fonts::tables::{avar, fvar, head, hhea, hmtx, maxp, name, variations};
 use write_fonts::types;
 
 /// 新設する可変軸のタグである。既存のどの登録済み軸タグとも重複しない
@@ -34,13 +36,23 @@ const ROUNDNESS_AXIS_NAME: &str = "Roundness";
 /// であり、`CFF2` に置き換えるため元のバイト列を引き継がない。`fvar`・
 /// `avar` は本モジュールが新たに組み立てるため、元のフォントに同名の
 /// テーブルが存在してもそちらを使う。
-const EXCLUDED_TABLE_TAGS: [types::Tag; 6] = [
+const EXCLUDED_TABLE_TAGS: [types::Tag; 16] = [
     types::Tag::new(b"CFF "),
     types::Tag::new(b"CFF2"),
     types::Tag::new(b"glyf"),
     types::Tag::new(b"loca"),
     types::Tag::new(b"fvar"),
     types::Tag::new(b"avar"),
+    types::Tag::new(b"head"),
+    types::Tag::new(b"hhea"),
+    types::Tag::new(b"hmtx"),
+    types::Tag::new(b"maxp"),
+    types::Tag::new(b"prep"),
+    types::Tag::new(b"fpgm"),
+    types::Tag::new(b"cvt "),
+    types::Tag::new(b"gasp"),
+    types::Tag::new(b"hdmx"),
+    types::Tag::new(b"DSIG"),
 ];
 
 /// `build_variable_font` の最終出力から除外するタグの一覧である。
@@ -62,8 +74,8 @@ const VARIABLE_FONT_EXCLUDED_TABLE_TAGS: [types::Tag; 7] = [
 /// 元の静的フォントのバイト列と、丸め前後で対応が取れたグリフの輪郭から、
 /// 丸みを表す可変軸を持つ CFF2 可変フォントのバイト列を組み立てる。
 ///
-/// name・hmtx・cmap など、輪郭以外のメタデータはすべて `original_font_data`
-/// から引き継ぐ。新たに、既存のどの登録済み軸とも重複しない独自軸タグ
+/// 送り幅・cmap などを `original_font_data` から引き継ぎ、輪郭の
+/// メトリクスを再構築する。新たに、既存のどの登録済み軸とも重複しない独自軸タグ
 /// `ROND` を持つ `fvar`/`avar` テーブルを追加する。この軸は最小値 (既定値)
 /// が丸める前の字形に、最大値が丸めた字形に対応し、その間はグリフごとの
 /// CFF2 item variation store 上の線形補間によって連続的に丸まっていく。
@@ -172,13 +184,13 @@ pub fn build_variable_font(
         .add_table(&build_name_table_with_axis_name(&font))
         .expect("name テーブルの組み立てに失敗した");
 
-    // hmtx・cmap など、輪郭・名称以外のメタデータはすべて元のフォントから
-    // そのまま引き継ぐ。輪郭関連のテーブル、新たに組み立て直す fvar・avar・
+    // cmap などを元のフォントから引き継ぐ。輪郭とメトリクス、TrueType の
+    // 命令関連のテーブル、新たに組み立て直す fvar・avar・
     // name は除外する (copy_missing_tables は追加済みのタグを上書きしない
     // ため、除外しなければ元の 'CFF ' テーブル等が余分に残ってしまう)。
     for record in font.table_directory().table_records() {
         let tag = record.tag();
-        if VARIABLE_FONT_EXCLUDED_TABLE_TAGS.contains(&tag) {
+        if VARIABLE_FONT_EXCLUDED_TABLE_TAGS.contains(&tag) || EXCLUDED_TABLE_TAGS.contains(&tag) {
             continue;
         }
         if let Some(data) = font.table_data(tag) {
@@ -186,6 +198,9 @@ pub fn build_variable_font(
         }
     }
 
+    let defaults = matched_glyphs.iter().map(|(p, _)| p).collect::<Vec<_>>();
+    let extremes = matched_glyphs.iter().map(|(_, p)| p).collect::<Vec<_>>();
+    add_outline_metrics(&mut builder, &font, &defaults, &extremes);
     builder.build()
 }
 
@@ -198,23 +213,19 @@ pub fn build_variable_font(
 /// 直接書き込む。そのため `blend`・`fvar`・`avar`・item variation store は
 /// 一切生成せず、CFF2 のトップ DICT にも VariationStore への参照を持たない。
 ///
-/// この違いは最終的な曲線セグメント数に影響する。`round_path_matched` は
-/// 2 マスターの要素数を一致させるために各丸め弧を 2 本の 3 次ベジエへ
-/// 分割するが、`round_path` は 1 本の 3 次ベジエのまま保持する。可変
-/// フォントを `fonttools varLib.instancer` で 1 点に固定しても、この
-/// 2 分割された弧は 1 本に戻らないため、最初から `round_path` の結果を
-/// 焼き付ける本関数の方が、丸め弧に由来するセグメント数を約半分に抑え
-/// られる。
+/// 配布経路では `round_path_matched` と `lerp_matched_paths` の補間結果を
+/// 書き込む。`t = 1` であっても対応付けのために分割した弧はそのまま残る。
 ///
-/// name・hmtx・cmap など、輪郭以外のメタデータはすべて `original_font_data`
-/// からそのまま引き継ぐ。
+/// 送り幅・cmap 等を入力から引き継ぎ、maxp・head・hhea・hmtx の輪郭
+/// メトリクスを出力する座標に合わせて再構築する。TrueType の命令テーブル
+/// と旧署名は引き継がない。
 ///
 /// # Args
 /// - `original_font_data` - 変換元の静的フォントのバイト列であり、CFF の
 ///   アウトラインを含む静的な OpenType フォントである必要がある。
 /// - `rounded_glyphs` - グリフ ID の順序で並んだ、丸めた後の輪郭の一覧で
 ///   ある。各要素は、`outline::extract_glyphs` で取り出した輪郭を
-///   `round::round_path` に渡して得られたものでなければならない。要素数は
+///   `round::round_path` または対応する輪郭の補間で得られたもの。要素数は
 ///   `original_font_data` のグリフ数と一致していなければならない。
 ///
 /// # Returns
@@ -298,7 +309,124 @@ pub fn build_static_font(original_font_data: &[u8], rounded_glyphs: &[kurbo::Bez
         }
     }
 
+    let glyphs = rounded_glyphs.iter().collect::<Vec<_>>();
+    add_outline_metrics(&mut builder, &font, &glyphs, &[]);
     builder.build()
+}
+
+/// 実際にエンコードする座標の輪郭から、CFF2 のメトリクスを組み立てる。
+///
+/// # Args
+/// - `builder` - 出力テーブルを追加する先である。
+/// - `font` - 送り幅などを引き継ぐ入力フォントである。
+/// - `glyphs` - 既定の輪郭を GID 順に並べたもの。
+/// - `extremes` - 可変軸の最大値の輪郭。head の全体境界に含める。
+fn add_outline_metrics(
+    builder: &mut write_fonts::FontBuilder,
+    font: &read_fonts::FontRef,
+    glyphs: &[&kurbo::BezPath],
+    extremes: &[&kurbo::BezPath],
+) {
+    let mut output_head = head::Head::from_table_ref(&font.head().expect("Missing head table"));
+    let mut output_hhea = hhea::Hhea::from_table_ref(&font.hhea().expect("Missing hhea table"));
+    let input_metrics = font.hmtx().expect("Missing hmtx table");
+    let mut metrics = Vec::with_capacity(glyphs.len());
+    let mut bounds = None::<kurbo::Rect>;
+    let mut extents = None::<(i16, i16, i16)>;
+    let mut max_advance = 0;
+    for (gid, glyph) in glyphs.iter().enumerate() {
+        // 座標の整数化後に境界を測り、CharString と hmtx の原点を合わせる。
+        let bbox = encoded_bounding_box(glyph);
+        let advance = input_metrics
+            .advance((gid as u32).into())
+            .expect("Missing glyph advance");
+        let lsb = bbox.map_or(0, |rect| metric_i16((rect.x0 + 0.5).floor()));
+        let right = bbox.map_or(0, |rect| metric_i16((rect.x1 + 0.5).floor()));
+        let rsb = bbox.map_or(0, |_| metric_i16(f64::from(advance) - f64::from(right)));
+        metrics.push(hmtx::LongMetric {
+            advance,
+            side_bearing: lsb,
+        });
+        max_advance = max_advance.max(advance);
+        if let Some(rect) = bbox {
+            // hhea の輪郭集計には、輪郭を持たない空白グリフを含めない。
+            extents = Some(extents.map_or((lsb, rsb, right), |(left, side, extent)| {
+                (left.min(lsb), side.min(rsb), extent.max(right))
+            }));
+            bounds = Some(bounds.map_or(rect, |previous| previous.union(rect)));
+        }
+    }
+    for glyph in extremes {
+        if let Some(rect) = encoded_bounding_box(glyph) {
+            bounds = Some(bounds.map_or(rect, |previous| previous.union(rect)));
+        }
+    }
+    let bounds = bounds.unwrap_or(kurbo::Rect::ZERO);
+    let (min_lsb, min_rsb, max_extent) = extents.unwrap_or((0, 0, 0));
+    output_head.x_min = metric_i16(bounds.x0.floor());
+    output_head.y_min = metric_i16(bounds.y0.floor());
+    output_head.x_max = metric_i16(bounds.x1.ceil());
+    output_head.y_max = metric_i16(bounds.y1.ceil());
+    output_head.index_to_loc_format = 0;
+    output_hhea.number_of_h_metrics = glyphs.len() as u16;
+    output_hhea.advance_width_max = max_advance.into();
+    output_hhea.min_left_side_bearing = min_lsb.into();
+    output_hhea.min_right_side_bearing = min_rsb.into();
+    output_hhea.x_max_extent = max_extent.into();
+    builder
+        .add_table(&output_head)
+        .expect("Failed to write head");
+    builder
+        .add_table(&output_hhea)
+        .expect("Failed to write hhea");
+    builder
+        .add_table(&hmtx::Hmtx {
+            h_metrics: metrics,
+            left_side_bearings: Vec::new(),
+        })
+        .expect("Failed to write hmtx");
+    // CFF2 の maxp は TrueType の命令用フィールドを持たない version 0.5。
+    builder
+        .add_table(&maxp::Maxp::new(glyphs.len() as u16))
+        .expect("Failed to write maxp");
+}
+
+/// フォントの符号付き16ビットメトリクスに収まる有限値を変換する。
+fn metric_i16(value: f64) -> i16 {
+    assert!(
+        value.is_finite() && (-32768.0..=32767.0).contains(&value),
+        "Outline metric is outside the signed 16-bit range: {value}"
+    );
+    value as i16
+}
+
+/// 静的 CharString と同じ整数化・次数上げを経た輪郭の境界を返す。
+fn encoded_bounding_box(path: &kurbo::BezPath) -> Option<kurbo::Rect> {
+    assert!(
+        path.is_finite(),
+        "Glyph outline must contain finite coordinates"
+    );
+    let mut encoded = kurbo::BezPath::new();
+    for subpath in to_static_subpaths(path) {
+        for (index, segment) in subpath.iter().enumerate() {
+            match segment {
+                StaticSeg::Line(line) => {
+                    if index == 0 {
+                        encoded.move_to(line.p0);
+                    }
+                    encoded.line_to(line.p1);
+                }
+                StaticSeg::Cubic(curve) => {
+                    if index == 0 {
+                        encoded.move_to(curve.p0);
+                    }
+                    encoded.curve_to(curve.p1, curve.p2, curve.p3);
+                }
+            }
+        }
+        encoded.close_path();
+    }
+    (!encoded.elements().is_empty()).then(|| encoded.bounding_box())
 }
 
 /// `build_variable_font` が組み立てた CFF2 可変フォントのバイト列を、外部
@@ -803,10 +931,13 @@ const INTEGER_SNAP_EPSILON: f64 = 1e-3;
 /// - `buf` - 書き込み先のバイト列である。
 /// - `value` - 書き込む数値である。
 fn push_charstring_number(buf: &mut Vec<u8>, value: f64) {
+    assert!(
+        value.is_finite() && (-32768.0..32768.0).contains(&value),
+        "CharString operand must be finite and within the 16.16 range: {value}"
+    );
     let rounded = value.round();
-    let is_integer = (value - rounded).abs() < INTEGER_SNAP_EPSILON
-        && rounded >= f64::from(i32::MIN)
-        && rounded <= f64::from(i32::MAX);
+    let is_integer =
+        (value - rounded).abs() < INTEGER_SNAP_EPSILON && (-32768.0..=32767.0).contains(&rounded);
     if is_integer {
         push_charstring_int(buf, rounded as i32);
     } else {
@@ -846,10 +977,7 @@ fn push_charstring_int(buf: &mut Vec<u8>, value: i32) {
             buf.push(28);
             buf.extend_from_slice(&(value as i16).to_be_bytes());
         }
-        _ => {
-            buf.push(29);
-            buf.extend_from_slice(&value.to_be_bytes());
-        }
+        _ => panic!("CharString integer is outside the signed 16-bit range: {value}"),
     }
 }
 
@@ -1552,5 +1680,57 @@ mod tests {
                 && (expected.y1 - actual.y1).abs() < TOLERANCE,
             "expected {expected:?}, actual {actual:?}"
         );
+    }
+    /// 元の maxp と LSB をそのまま残さず、出力輪郭のメトリクスを測る。
+    #[test]
+    fn static_metrics_match_encoded_outlines_and_use_cff_maxp() {
+        use read_fonts::TableProvider;
+        let (source, _) = test_font::build_test_font();
+        let font = read_fonts::FontRef::new(&source).unwrap();
+        let mut source_builder = write_fonts::FontBuilder::new();
+        for record in font.table_directory().table_records() {
+            source_builder.add_raw(
+                record.tag(),
+                font.table_data(record.tag()).unwrap().as_bytes().to_vec(),
+            );
+        }
+        // TrueType の maxp と専用命令テーブルを模した入力を作る。
+        let mut maxp_bytes = vec![0, 1, 0, 0, 0, 2];
+        maxp_bytes.extend_from_slice(&[0; 26]);
+        source_builder.add_raw(types::Tag::new(b"maxp"), maxp_bytes);
+        source_builder.add_raw(types::Tag::new(b"prep"), vec![0]);
+        source_builder.add_raw(types::Tag::new(b"DSIG"), vec![0; 8]);
+        let source = source_builder.build();
+        let paths = vec![
+            kurbo::BezPath::new(),
+            kurbo::BezPath::from_svg("M150.3 -25 L550 0 L500 800 Z").unwrap(),
+        ];
+        let bytes = super::build_static_font(&source, &paths);
+        let font = read_fonts::FontRef::new(&bytes).unwrap();
+        assert_eq!(6, font.table_data(types::Tag::new(b"maxp")).unwrap().len());
+        assert!(font.table_data(types::Tag::new(b"prep")).is_none());
+        assert!(font.table_data(types::Tag::new(b"DSIG")).is_none());
+        assert_eq!(Some(150), font.hmtx().unwrap().side_bearing(1u32.into()));
+        assert_eq!(Some(700), font.hmtx().unwrap().advance(1u32.into()));
+        assert_eq!(-25, font.head().unwrap().y_min());
+        assert_eq!(800, font.head().unwrap().y_max());
+        assert_eq!(550, font.hhea().unwrap().x_max_extent().to_i16());
+    }
+
+    /// DICT 専用の32ビット数値を CharString に書き込まない。
+    #[test]
+    fn charstring_rejects_unrepresentable_or_nonfinite_numbers() {
+        for value in [32768.0, -32769.0, 40000.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                panic::catch_unwind(|| super::push_charstring_number(&mut Vec::new(), value))
+                    .is_err()
+            );
+        }
+        let mut bytes = Vec::new();
+        super::push_charstring_number(&mut bytes, 32767.0);
+        assert_eq!(vec![28, 127, 255], bytes);
+        let mut bytes = Vec::new();
+        super::push_charstring_number(&mut bytes, 32767.99998);
+        assert_eq!(255, bytes[0]);
     }
 }

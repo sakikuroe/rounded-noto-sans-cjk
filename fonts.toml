@@ -19,14 +19,15 @@ inner_radius = 0.0
 rond = 0.85
 family_name = "Rounded Noto Sans CJK JP"
 style_name = "Regular"
+weight_class = 400
 
 [[font]]
 name = "sans-bold"
 # 静的な7ウェイト(Thin〜Black)ではなく、Noto Sans JP可変フォント
 # (google-fonts/NotoSansJP[wght].ttf) からweight=490をインスタンス化した
 # もの。TrueType(glyf)由来で輪郭の巻き方向がCFF由来と逆なため、
-# あらかじめfontToolsで全グリフの輪郭方向を反転済み。前処理の手順は
-# README を参照。
+# 従来の前処理で反転済みのファイル名を保持する。変換時に方向を正規化
+# するため、反転前のインスタンスも同じパスに置ける。README を参照。
 source = "NotoSansJP-w490-reversed.ttf"
 output = "RoundedNotoSansCJKJP-Bold.otf"
 base_radius = 35.0
@@ -34,6 +35,7 @@ inner_radius = 0.0
 rond = 1.00
 family_name = "Rounded Noto Sans CJK JP"
 style_name = "Bold"
+weight_class = 700
 
 [[font]]
 name = "mono-regular"
@@ -51,6 +53,7 @@ ascii_inner_radius = 0.0
 ascii_rond = 0.75
 family_name = "Rounded Noto Code CJK JP"
 style_name = "Regular"
+weight_class = 400
 
 [[font]]
 name = "mono-bold"
@@ -67,3 +70,4 @@ ascii_inner_radius = 0.0
 ascii_rond = 0.3
 family_name = "Rounded Noto Code CJK JP"
 style_name = "Bold"
+weight_class = 700

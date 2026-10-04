@@ -11,7 +11,8 @@
 //! ライセンス説明など残すべき他の nameID はそのまま引き継ぐ。
 
 use read_fonts::TableProvider;
-use write_fonts::tables::name;
+use write_fonts::from_obj::FromTableRef;
+use write_fonts::tables::{head, name, os2};
 use write_fonts::types;
 
 /// name テーブルへ書き込む際に用いる、Windows プラットフォームの
@@ -41,6 +42,8 @@ pub struct FontNaming {
     /// バージョン文字列 (nameID 5) であり、"Version 1.000" のような書式を
     /// 想定する。
     pub version: String,
+    /// 入力のウェイトと独立した出力ウェイト。未指定の Regular/Bold は400/700。
+    pub weight_class: Option<u16>,
 }
 
 /// 変換元フォントの商標名 (Noto・Source) について、本ツールが公式版や
@@ -78,7 +81,8 @@ const TRADEMARK_DISCLAIMER: &str = "This is an unofficial, independently modifie
 ///
 /// # Returns
 /// `name` テーブルを差し替えたフォントのバイト列を返す。`name` 以外の
-/// テーブルはすべて `font_data` から変更なく引き継がれる。
+/// テーブルは原則引き継ぐが、head・OS/2 の版とスタイルも更新する。
+/// 静的フォントでは入力由来の STAT を除去し、旧署名 DSIG も除去する。
 ///
 /// # Panics
 /// - `font_data` が有効な OpenType フォントとして解析できない場合、または
@@ -169,10 +173,55 @@ pub fn rename(font_data: &[u8], naming: &FontNaming) -> Vec<u8> {
         .add_table(&name::Name::new(records))
         .expect("name テーブルの組み立てに失敗した");
 
-    // name 以外のテーブルは、すべて元のフォントからそのまま引き継ぐ。
+    let mut output_head = head::Head::from_table_ref(&font.head().expect("Missing head table"));
+    output_head.font_revision = parse_version(&naming.version)
+        .expect("Version must be 'Version <finite nonnegative number below 32768>'");
+    let mut output_os2 = os2::Os2::from_table_ref(&font.os2().expect("Missing OS/2 table"));
+    let bold = naming.style_name.contains("Bold");
+    let italic = naming.style_name.contains("Italic") || naming.style_name.contains("Oblique");
+    let default_weight = match naming.style_name.as_str() {
+        "Regular" | "Italic" => 400,
+        "Bold" | "Bold Italic" => 700,
+        _ => output_os2.us_weight_class,
+    };
+    output_os2.us_weight_class = naming.weight_class.unwrap_or(default_weight);
+    assert!(
+        (1..=1000).contains(&output_os2.us_weight_class),
+        "Weight class must be between 1 and 1000"
+    );
+    // name のスタイルと OS/2・head の選択情報を同時に更新する。
+    output_os2.fs_selection.remove(
+        os2::SelectionFlags::BOLD | os2::SelectionFlags::ITALIC | os2::SelectionFlags::REGULAR,
+    );
+    output_head
+        .mac_style
+        .remove(head::MacStyle::BOLD | head::MacStyle::ITALIC);
+    if bold {
+        output_os2.fs_selection.insert(os2::SelectionFlags::BOLD);
+        output_head.mac_style.insert(head::MacStyle::BOLD);
+    }
+    if italic {
+        output_os2.fs_selection.insert(os2::SelectionFlags::ITALIC);
+        output_head.mac_style.insert(head::MacStyle::ITALIC);
+    }
+    if naming.style_name == "Regular" {
+        output_os2.fs_selection.insert(os2::SelectionFlags::REGULAR);
+    }
+    builder
+        .add_table(&output_head)
+        .expect("Failed to write head");
+    builder
+        .add_table(&output_os2)
+        .expect("Failed to write OS/2");
+
+    // 更新済みの head・OS/2 と、入力のスタイル参照・旧署名を除いて引き継ぐ。
     for table_record in font.table_directory().table_records() {
         let tag = table_record.tag();
-        if tag == types::Tag::new(b"name") {
+        if [b"name", b"head", b"OS/2", b"DSIG"]
+            .iter()
+            .any(|bytes| tag == types::Tag::new(bytes))
+            || (font.fvar().is_err() && tag == types::Tag::new(b"STAT"))
+        {
             continue;
         }
         if let Some(data) = font.table_data(tag) {
@@ -181,6 +230,23 @@ pub fn rename(font_data: &[u8], naming: &FontNaming) -> Vec<u8> {
     }
 
     builder.build()
+}
+
+/// nameID 5 の版の数値部分を head.fontRevision の16.16値へ変換する。
+///
+/// # Args
+/// - `version` - `Version 1.001` のような版文字列。数値後の説明は許可する。
+///
+/// # Returns
+/// 有限で0以上32768未満なら値を返し、不正な書式なら `None` を返す。
+pub fn parse_version(version: &str) -> Option<types::Fixed> {
+    let value = version
+        .strip_prefix("Version ")?
+        .split_whitespace()
+        .next()?
+        .parse::<f64>()
+        .ok()?;
+    (value.is_finite() && (0.0..32768.0).contains(&value)).then(|| types::Fixed::from_f64(value))
 }
 
 #[cfg(test)]
@@ -275,6 +341,7 @@ mod tests {
             copyright: "Copyright © 2026 Test Author. Portions © Original Copyright Holder."
                 .to_string(),
             version: "Version 1.000".to_string(),
+            weight_class: None,
         }
     }
 
@@ -378,5 +445,65 @@ mod tests {
             Some("RoundedTestSans-Regular".to_string()),
             read_name(&renamed, types::NameId::POSTSCRIPT_NAME)
         );
+    }
+    /// 元の Regular/490 を Bold と命名した場合、OS の選択情報も更新する。
+    #[test]
+    fn rename_updates_style_and_font_revision() {
+        use read_fonts::TableProvider;
+        let source = build_source_font();
+        let mut naming = test_naming();
+        naming.style_name = "Bold".to_string();
+        naming.version = "Version 0.101".to_string();
+        let bytes = super::rename(&source, &naming);
+        let font = read_fonts::FontRef::new(&bytes).unwrap();
+        let os2 = font.os2().unwrap();
+        assert_eq!(700, os2.us_weight_class());
+        assert!(
+            os2.fs_selection()
+                .contains(write_fonts::tables::os2::SelectionFlags::BOLD)
+        );
+        assert!(
+            !os2.fs_selection()
+                .contains(write_fonts::tables::os2::SelectionFlags::REGULAR)
+        );
+        assert!(
+            font.head()
+                .unwrap()
+                .mac_style()
+                .contains(write_fonts::tables::head::MacStyle::BOLD)
+        );
+        assert!((font.head().unwrap().font_revision().to_f64() - 0.101).abs() < 1e-5);
+        naming.style_name = "Regular".to_string();
+        naming.weight_class = Some(450);
+        let bytes = super::rename(&bytes, &naming);
+        let font = read_fonts::FontRef::new(&bytes).unwrap();
+        assert_eq!(450, font.os2().unwrap().us_weight_class());
+        assert!(
+            !font
+                .head()
+                .unwrap()
+                .mac_style()
+                .contains(write_fonts::tables::head::MacStyle::BOLD)
+        );
+        assert!(
+            font.os2()
+                .unwrap()
+                .fs_selection()
+                .contains(write_fonts::tables::os2::SelectionFlags::REGULAR)
+        );
+    }
+
+    /// head に表現できない版を、名前の変更前に拒否する。
+    #[test]
+    fn invalid_versions_are_rejected() {
+        for version in [
+            "invalid",
+            "Version NaN",
+            "Version inf",
+            "Version -1",
+            "Version 32768",
+        ] {
+            assert!(super::parse_version(version).is_none());
+        }
     }
 }
