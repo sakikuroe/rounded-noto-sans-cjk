@@ -1,4 +1,4 @@
-use std::{env, fs, path};
+use std::{env, fs, path, process};
 
 use read_fonts::{TableProvider, types};
 use rounded_noto_sans_cjk::{config, naming};
@@ -177,6 +177,22 @@ fn main() {
             }
         }
 
+        // 幅の分類と組版参照の更新は fontTools で一括して行います。
+        // スクリプトをバイナリーに同梱し、実行場所に依存させません。
+        if entry.normalize_code_widths {
+            let normalized = tempfile::NamedTempFile::new()
+                .expect("Failed to create normalized font temporary file");
+            let status = process::Command::new("python3")
+                .arg("-c")
+                .arg(include_str!("../../scripts/normalize_code_widths.py"))
+                .arg(&output)
+                .arg(normalized.path())
+                .status()
+                .expect("Failed to execute Python width normalization");
+            assert!(status.success(), "Code width normalization failed");
+            fs::copy(normalized.path(), &output).expect("Failed to write normalized font");
+        }
+
         // 変換が完了した出力ファイルを読み直し、name テーブルを配布用の
         // 名称・著作権表示へ書き換えたうえで上書きする。convert_static・
         // convert_static_with_ascii のシグネチャ (ファイルへの直接書き込み)
@@ -188,7 +204,14 @@ fn main() {
         );
         let original_copyright = read_copyright_notice(&source);
         let ascii_copyright = ascii_source.as_deref().map(read_copyright_notice);
-        let copyright = build_copyright(&original_copyright, ascii_copyright.as_deref());
+        let mut copyright = build_copyright(&original_copyright, ascii_copyright.as_deref());
+        // 輪郭の丸め以外の改変も、生成フォント自身に記録します。
+        if entry.normalize_code_widths {
+            copyright.push_str(
+                " Horizontal advances, outlines and layout tables were normalized to \
+                 zero-, half- and full-em cells.",
+            );
+        }
         let naming = naming::FontNaming {
             family_name: entry.family_name.clone(),
             style_name: entry.style_name.clone(),

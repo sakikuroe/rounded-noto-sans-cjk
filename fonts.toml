@@ -37,6 +37,7 @@ style_name = "Bold"
 
 [[font]]
 name = "mono-regular"
+normalize_code_widths = true
 source = "NotoSansMonoCJKjp-Regular.otf"
 output = "RoundedNotoCodeCJKJP-Regular.otf"
 base_radius = 45.0
@@ -53,6 +54,7 @@ style_name = "Regular"
 
 [[font]]
 name = "mono-bold"
+normalize_code_widths = true
 source = "NotoSansMonoCJKjp-Bold.otf"
 output = "RoundedNotoCodeCJKJP-Bold.otf"
 base_radius = 45.0

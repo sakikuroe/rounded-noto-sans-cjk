@@ -46,6 +46,10 @@ pub struct FontEntry {
     /// のときのみ使う。
     #[serde(default)]
     pub ascii_rond: Option<f64>,
+    /// 全字形の水平字送り幅を 0・0.5・1 em に揃えます。
+    /// Unicode 16.0.0 に基づく Code フォント専用の処理です。
+    #[serde(default)]
+    pub normalize_code_widths: bool,
     /// 生成したフォントの `name` テーブルに設定する、フォントファミリー名
     /// である (`naming::FontNaming::family_name` にそのまま渡す)。変換元
     /// フォントのファミリー名 (例: "Noto Sans CJK JP") とは異なる名称を
@@ -137,6 +141,7 @@ style_name = "Regular"
 
 [[font]]
 name = "mono-regular"
+normalize_code_widths = true
 source = "NotoSansMonoCJKjp-Regular.otf"
 output = "mono-regular-out.otf"
 base_radius = 45.0
@@ -181,10 +186,12 @@ style_name = "Regular"
         assert_eq!(5.0, sans.inner_radius);
         assert_eq!(0.85, sans.rond);
         assert_eq!(None, sans.ascii_source);
+        assert!(!sans.normalize_code_widths);
         assert_eq!("Rounded Test Sans", sans.family_name);
         assert_eq!("Regular", sans.style_name);
         // 2 つ目のエントリーは ASCII 差し替えの 4 フィールドをすべて持つ。
         let mono = &config.fonts[1];
+        assert!(mono.normalize_code_widths);
         assert_eq!(Some("SourceCodePro.otf".to_string()), mono.ascii_source);
         assert_eq!(Some(50.0), mono.ascii_base_radius);
         assert_eq!(Some(0.0), mono.ascii_inner_radius);

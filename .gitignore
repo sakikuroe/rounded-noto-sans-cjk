@@ -7,3 +7,6 @@
 
 # リリース梱包スクリプト (scripts/package-release.sh) の出力先である。
 /dist
+
+# Python の検証スクリプトのキャッシュです。
+__pycache__/
