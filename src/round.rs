@@ -18,6 +18,26 @@ pub enum RoundError {
     InvalidBaseRadius,
     /// `inner_radius` が負の値または非有限値 (NaN・無限大) である。
     InvalidInnerRadius,
+    /// CLI・設定の丸みが非有限、または0..1の範囲外である。
+    InvalidRoundness,
+    /// 輪郭に非有限の座標が含まれる。
+    InvalidOutline,
+}
+
+/// CLI・設定の丸めパラメータを生成前に検証する。
+///
+/// # Args
+/// - `base_radius`・`inner_radius` - 有限で0以上の半径である。
+/// - `t` - 有限で0..1の丸みである。
+///
+/// # Returns
+/// 有効なら `Ok(())`、不正なら該当する `RoundError` を返す。
+pub fn validate_parameters(base_radius: f64, inner_radius: f64, t: f64) -> Result<(), RoundError> {
+    validate_radii(base_radius, inner_radius)?;
+    if !t.is_finite() || !(0.0..=1.0).contains(&t) {
+        return Err(RoundError::InvalidRoundness);
+    }
+    Ok(())
 }
 
 /// 角の前後にある 2 つの接線ベクトルから、その角で接線がどれだけ回転するかを
@@ -171,10 +191,34 @@ fn validate_radii(base_radius: f64, inner_radius: f64) -> Result<(), RoundError>
 /// `seg` の `t` における接線ベクトルを返す。大きさ (ノルム) は導関数の
 /// 定義どおりの値になり、正規化はされていない。
 fn tangent_at(seg: &kurbo::PathSeg, t: f64) -> kurbo::Vec2 {
-    match *seg {
+    let tangent = match *seg {
         kurbo::PathSeg::Line(line) => line.p1 - line.p0,
         kurbo::PathSeg::Quad(quad) => quad.deriv().eval(t).to_vec2(),
         kurbo::PathSeg::Cubic(cubic) => cubic.deriv().eval(t).to_vec2(),
+    };
+    if tangent.hypot2() > 0.0 {
+        return tangent;
+    }
+    // 端点の制御点が重なる曲線では、次の非ゼロの差分が極限接線になる。
+    match *seg {
+        kurbo::PathSeg::Cubic(cubic) if t == 0.0 => {
+            let fallback = cubic.p2 - cubic.p0;
+            if fallback.hypot2() > 0.0 {
+                fallback
+            } else {
+                cubic.p3 - cubic.p0
+            }
+        }
+        kurbo::PathSeg::Cubic(cubic) if t == 1.0 => {
+            let fallback = cubic.p3 - cubic.p1;
+            if fallback.hypot2() > 0.0 {
+                fallback
+            } else {
+                cubic.p3 - cubic.p0
+            }
+        }
+        kurbo::PathSeg::Quad(quad) if t == 0.0 || t == 1.0 => quad.p2 - quad.p0,
+        _ => tangent,
     }
 }
 
@@ -362,7 +406,10 @@ fn compute_cut_plan(
     base_radius: f64,
     inner_radius: f64,
 ) -> Option<CutPlan> {
-    let segs = kurbo::segments(elements.iter().copied()).collect::<Vec<kurbo::PathSeg>>();
+    // 点だけの辺を除き、接続する実際の辺どうしで角度を計算する。
+    let segs = kurbo::segments(elements.iter().copied())
+        .filter(|seg| seg.arclen(kurbo::DEFAULT_ACCURACY) > 0.0)
+        .collect::<Vec<kurbo::PathSeg>>();
     let n = segs.len();
     if n == 0 {
         return None;
@@ -712,6 +759,12 @@ pub fn round_path(
     inner_radius: f64,
 ) -> Result<kurbo::BezPath, RoundError> {
     validate_radii(base_radius, inner_radius)?;
+    if !path.is_finite() {
+        return Err(RoundError::InvalidOutline);
+    }
+    if base_radius == 0.0 && inner_radius == 0.0 {
+        return Ok(path.clone());
+    }
 
     // 各サブパスを独立に丸め、結果を結合して 1 つの輪郭に戻す。サブパスの
     // 本数や順序は、この結合順を元の並びのまま保つことで維持される。
@@ -756,6 +809,12 @@ pub fn round_path_matched(
     inner_radius: f64,
 ) -> Result<(kurbo::BezPath, kurbo::BezPath), RoundError> {
     validate_radii(base_radius, inner_radius)?;
+    if !path.is_finite() {
+        return Err(RoundError::InvalidOutline);
+    }
+    if base_radius == 0.0 && inner_radius == 0.0 {
+        return Ok((path.clone(), path.clone()));
+    }
 
     let mut original_elements = Vec::new();
     let mut rounded_elements = Vec::new();
@@ -801,11 +860,13 @@ pub fn round_path_matched(
 /// - `t` - 補間の割合である。`0.0` で `original` に、`1.0` で `rounded` に
 ///   一致する。範囲外の値 (負の値や 1.0 を超える値) を渡した場合は外挿
 ///   となり、丸めを誇張した (あるいは反転させた) 輪郭が得られる。
+///   NaN と無限大は拒否する。
 ///
 /// # Returns
 /// 補間後の輪郭を表す `kurbo::BezPath` を返す。
 ///
 /// # Panics
+/// - `t` が有限値でない場合にパニックする。
 /// - `original` と `rounded` の要素数、または対応する位置の要素の種類が
 ///   一致しない場合にパニックする (`round_path_matched` の結果をそのまま
 ///   渡している限り起こらない)。
@@ -829,6 +890,7 @@ pub fn lerp_matched_paths(
     rounded: &kurbo::BezPath,
     t: f64,
 ) -> kurbo::BezPath {
+    assert!(t.is_finite(), "Roundness interpolation must be finite");
     let original_elements = original.elements();
     let rounded_elements = rounded.elements();
     assert_eq!(
@@ -1303,5 +1365,50 @@ mod tests {
 
         // Assert
         assert!(result.is_err());
+    }
+    /// 重複した点を挿入しても、実際の隣接辺を使って同じ角を丸める。
+    #[test]
+    fn duplicate_points_do_not_poison_rounding() {
+        let reference = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 L0 100 Z").unwrap();
+        let expected = super::round_path_matched(&reference, 20.0, 0.0).unwrap();
+        for svg in [
+            "M0 0 L0 0 L100 0 L100 100 L0 100 Z",
+            "M0 0 L100 0 L100 100 L0 100 L0 0 L0 0 Z",
+            "M0 0 L100 0 L100 0 L100 100 L0 100 Z",
+        ] {
+            let path = kurbo::BezPath::from_svg(svg).unwrap();
+            let (original, rounded) = super::round_path_matched(&path, 20.0, 0.0).unwrap();
+            assert!(original.is_finite() && rounded.is_finite());
+            assert!((expected.1.area() - rounded.area()).abs() < 1e-6);
+            assert!((reference.area() - original.area()).abs() < 1e-6);
+        }
+    }
+
+    /// 制御点の重なりによるゼロ導関数を、曲線の極限接線で補う。
+    #[test]
+    fn repeated_endpoint_controls_still_round_corners() {
+        let path = kurbo::BezPath::from_svg("M0 0 C0 0 80 0 100 0 L100 100 L0 100 Z").unwrap();
+        let (_, rounded) = super::round_path_matched(&path, 20.0, 0.0).unwrap();
+        assert!(rounded.is_finite());
+        assert!(rounded.area() < 9750.0);
+    }
+
+    /// 公開ライブラリの外挿は保ち、非有限値だけは補間前に拒否する。
+    #[test]
+    fn nonfinite_interpolation_is_rejected() {
+        let path = kurbo::BezPath::from_svg("M0 0 L100 0 L100 100 Z").unwrap();
+        let (original, rounded) = super::round_path_matched(&path, 20.0, 0.0).unwrap();
+        for t in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                std::panic::catch_unwind(|| super::lerp_matched_paths(&original, &rounded, t))
+                    .is_err()
+            );
+            assert_eq!(
+                Err(super::RoundError::InvalidRoundness),
+                super::validate_parameters(20.0, 0.0, t)
+            );
+        }
+        assert!(super::lerp_matched_paths(&original, &rounded, 1.1).is_finite());
+        assert!(super::validate_parameters(20.0, 0.0, 1.1).is_err());
     }
 }
