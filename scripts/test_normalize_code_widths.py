@@ -52,6 +52,35 @@ def fixture():
 
 
 class WidthTests(unittest.TestCase):
+    def test_point_only_contour_does_not_shift_glyph_during_compression(self):
+        import cffsubr
+
+        font = fixture()
+        top = font["CFF2"].cff.topDictIndex[0]
+        source = top.CharStrings["A"]
+        pen = T2CharStringPen(None, None, CFF2=True)
+        pen.moveTo((150, 350))
+        pen.curveTo((150, 350), (150, 350), (150, 350))
+        pen.closePath()
+        pen.moveTo((20, 0))
+        pen.lineTo((400, 0))
+        pen.lineTo((400, 700))
+        pen.lineTo((20, 700))
+        pen.closePath()
+        top.CharStrings["A"] = pen.getCharString(
+            private=source.private, globalSubrs=source.globalSubrs, optimize=False)
+        normalize(font)
+        glyph = font.getBestCmap()[0x41]
+        before = font.getGlyphSet()
+        expected = BoundsPen(before)
+        before[glyph].draw(expected)
+        cffsubr.subroutinize(font)
+        after = font.getGlyphSet()
+        actual = BoundsPen(after)
+        after[glyph].draw(actual)
+        self.assertEqual(expected.bounds, actual.bounds)
+        self.assertEqual(font["hmtx"][glyph][1], round(actual.bounds[0]))
+
     def test_character_properties_and_exceptions(self):
         for text, expected in [("AéΩæ─█ﾡ", 500), ("が한ㄱＡ\u2003", 1000),
                                ("\u0301\u3099\u302e\u200b", 0), ("\u00ad", 500)]:

@@ -1,6 +1,7 @@
 //! フォントのバイト列から、グリフの輪郭を `kurbo::BezPath` として取り出す
 //! 機能を提供するモジュールである。
 
+use kurbo::Shape;
 use skrifa::{
     MetadataProvider, font, instance,
     outline::{self, OutlinePen},
@@ -209,6 +210,7 @@ pub fn extract_glyphs(font_data: &[u8]) -> Vec<kurbo::BezPath> {
     // あっても、このコレクションが差異を吸収してくれるため、以降は形式を
     // 意識せずに扱える。
     let outline_glyphs = font.outline_glyphs();
+    let is_truetype = font.glyf().is_ok();
 
     // グリフ ID の昇順 (0, 1, 2, ...) に、各グリフの輪郭を kurbo::BezPath へ変換
     // していく。
@@ -241,9 +243,31 @@ pub fn extract_glyphs(font_data: &[u8]) -> Vec<kurbo::BezPath> {
                 .unwrap_or_else(|e| panic!("failed to draw glyph {glyph_id}: {e}"));
 
             // 継ぎ目のわずかなズレに起因する極小セグメントを取り除く。
-            weld_seams(&pen.path)
+            let path = weld_seams(&pen.path);
+            // 穴の方向との関係を保つため、グリフ全体を反転する。
+            // 既に前処理で反転済みの入力は、正の面積なのでそのまま扱う。
+            if is_truetype {
+                normalize_truetype_winding(path)
+            } else {
+                path
+            }
         })
         .collect::<Vec<kurbo::BezPath>>()
+}
+
+/// グリフ全体の向きを CFF に揃え、穴と外郭の相対方向は維持する。
+///
+/// # Args
+/// - `path` - TrueType の展開済み輪郭。反転済みの旧入力も受け付ける。
+///
+/// # Returns
+/// 全体の符号付き面積が負なら反転し、それ以外は入力をそのまま返す。
+fn normalize_truetype_winding(path: kurbo::BezPath) -> kurbo::BezPath {
+    if path.area() < 0.0 {
+        path.reverse_subpaths()
+    } else {
+        path
+    }
 }
 
 #[cfg(test)]
@@ -452,7 +476,7 @@ mod tests {
 
     // シナリオ: 単純グリフの輪郭は、加工されず入力どおりに抽出される。
     #[test]
-    fn simple_glyph_outline_is_extracted_as_is() {
+    fn simple_glyph_outline_is_extracted_with_normalized_winding() {
         // Arrange
         let font_data = build_test_font();
         let sut = super::extract_glyphs;
@@ -462,11 +486,10 @@ mod tests {
 
         // Assert
         // 直線のみで構成される単純グリフ (gid 1) は、on-curve 点のみで
-        // 曖昧さがないため、入力した輪郭と完全に一致する。
-        assert_eq!(triangle(), glyphs[1]);
-        // 2 次ベジェ曲線を含む単純グリフ (gid 2) も同様に、入力した輪郭と
-        // 完全に一致する。
-        assert_eq!(lens(), glyphs[2]);
+        // 曖昧さがなく、CFF の方向に正規化した入力と完全に一致する。
+        assert_eq!(triangle().reverse_subpaths(), glyphs[1]);
+        // 2 次ベジェ曲線を含む単純グリフ (gid 2) も、方向を除く形状を保つ。
+        assert_eq!(lens().reverse_subpaths(), glyphs[2]);
     }
 
     // シナリオ: 複合グリフは、参照先の輪郭それぞれにコンポーネントの
@@ -488,7 +511,7 @@ mod tests {
         for element in lens().path_elements(0.1) {
             expected.push(kurbo::Affine::translate((-500.0, 200.0)) * element);
         }
-        assert_eq!(expected, glyphs[3]);
+        assert_eq!(expected.reverse_subpaths(), glyphs[3]);
     }
 
     // シナリオ: 開始点と終了点がわずか (SEAM_WELD_EPSILON 以内) にずれた
@@ -511,7 +534,7 @@ mod tests {
         expected.line_to((600.0, 700.0));
         expected.line_to((0.0, 0.0));
         expected.close_path();
-        assert_eq!(expected, glyphs[4]);
+        assert_eq!(expected.reverse_subpaths(), glyphs[4]);
     }
 
     // シナリオ: `weld_seams` は、しきい値を超えて離れた終了点には手を
@@ -578,5 +601,19 @@ mod tests {
         sut(&font_data);
 
         // Assert: #[should_panic] により、Act がパニックすることをもって検証する。
+    }
+    /// 全体の反転で穴を維持し、前処理済み入力を二重に反転しない。
+    #[test]
+    fn truetype_winding_preserves_holes_and_pre_reversed_inputs() {
+        let path =
+            kurbo::BezPath::from_svg("M0 0 L0 100 L100 100 L100 0 Z M25 25 L75 25 L75 75 L25 75 Z")
+                .unwrap();
+        let normalized = super::normalize_truetype_winding(path.clone());
+        assert!((7500.0 - normalized.area()).abs() < 1e-6);
+        assert_eq!(path.reverse_subpaths(), normalized);
+        assert_eq!(
+            normalized.clone(),
+            super::normalize_truetype_winding(normalized)
+        );
     }
 }

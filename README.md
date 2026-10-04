@@ -58,7 +58,7 @@ curl -LO https://github.com/notofonts/noto-cjk/releases/download/Sans2.004/11_No
 unzip -j 11_NotoSansMonoCJKjp.zip "*.otf" -d fonts
 ```
 
-Noto Sans JP at weight 490 (source of Sans Bold). No static build exists at this weight, so instantiate it from the variable font. The result is TrueType, whose contours wind in the opposite direction to CFF, so also reverse them with the bundled script:
+Noto Sans JP at weight 490 (source of Sans Bold). No static build exists at this weight, so instantiate it from the variable font. TrueType contour directions are normalized automatically during conversion. The commands below retain the previously reversed input and its configured filename for compatibility; reversal is optional, and an unreversed instance at the same path also works:
 
 ```sh
 curl -L -o "NotoSansJP[wght].ttf" "https://raw.githubusercontent.com/notofonts/noto-cjk/main/google-fonts/NotoSansJP%5Bwght%5D.ttf"
@@ -113,6 +113,8 @@ cargo run --release --bin rounded-noto-sans-cjk -- <input font> <output font> [b
 ## Configuration
 
 `fonts.toml` defines which source font is converted with which parameters, and the family/style names written into the results. To convert other weights or adjust the roundness, edit its `[[font]]` entries; the fields are described in the comments in that file.
+
+`weight_class` specifies the output family's weight independently of the source weight. Distributed Regular and Bold fonts use 400 and 700; these are also the defaults for those styles when omitted. Roundness values must be finite and within 0.0–1.0, and radii must be finite and nonnegative. Configuration is validated before generation, and each output is replaced only after compression, width normalization and naming succeed.
 
 ## License
 

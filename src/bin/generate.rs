@@ -118,7 +118,19 @@ fn main() {
 
     for entry in &config.fonts {
         let source = config.source_path(entry);
-        let output = config.output_path(entry);
+        let final_output = config.output_path(entry);
+        // 後段が失敗しても既存の配布物を保つため、同じディレクトリで完成させる。
+        let mut temporary_builder = tempfile::Builder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // 新規出力も通常のファイル作成と同じ umask に従う。
+            temporary_builder.permissions(fs::Permissions::from_mode(0o666));
+        }
+        let temporary = temporary_builder
+            .tempfile_in(final_output.parent().unwrap_or(path::Path::new(".")))
+            .expect("Failed to create output temporary file");
+        let output = temporary.path().to_path_buf();
         let ascii_source = config.ascii_source_path(entry);
 
         match &ascii_source {
@@ -137,7 +149,7 @@ fn main() {
                     entry.name,
                     source.display(),
                     ascii_source.display(),
-                    output.display(),
+                    final_output.display(),
                     entry.base_radius,
                     entry.inner_radius,
                     entry.rond,
@@ -162,7 +174,7 @@ fn main() {
                     "[{}] {} -> {} (base_radius={}, inner_radius={}, rond={})",
                     entry.name,
                     source.display(),
-                    output.display(),
+                    final_output.display(),
                     entry.base_radius,
                     entry.inner_radius,
                     entry.rond
@@ -217,9 +229,19 @@ fn main() {
             style_name: entry.style_name.clone(),
             copyright,
             version: config.version.clone(),
+            weight_class: entry.weight_class,
         };
         let converted = fs::read(&output).expect("生成したフォントの読み込みに失敗した");
         let renamed = naming::rename(&converted, &naming);
         fs::write(&output, renamed).expect("改名したフォントの書き込みに失敗した");
+        if let Ok(metadata) = fs::metadata(&final_output) {
+            temporary
+                .as_file()
+                .set_permissions(metadata.permissions())
+                .expect("Failed to preserve output permissions");
+        }
+        temporary
+            .persist(&final_output)
+            .expect("Failed to replace completed output font");
     }
 }

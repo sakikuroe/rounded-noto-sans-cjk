@@ -49,6 +49,8 @@ fn main() {
         }
     };
 
+    rounded_noto_sans_cjk::round::validate_parameters(base_radius, inner_radius, t)
+        .expect("Radii must be finite and nonnegative; roundness must be within 0..1");
     rounded_noto_sans_cjk::convert_static(
         path::Path::new(input_path),
         path::Path::new(output_path),

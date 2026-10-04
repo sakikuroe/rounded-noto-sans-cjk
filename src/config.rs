@@ -60,6 +60,9 @@ pub struct FontEntry {
     /// 名 (`naming::FontNaming::style_name` にそのまま渡す) である。
     /// "Regular"・"Bold" のようなスタイル名を指定する。
     pub style_name: String,
+    /// 入力のウェイトと独立した出力ウェイト。Regular/Bold は通常400/700。
+    #[serde(default)]
+    pub weight_class: Option<u16>,
 }
 
 /// フォント生成設定ファイル全体である。
@@ -94,7 +97,40 @@ impl Config {
     ///   欠落や型の不一致など) 場合にパニックする。
     pub fn load(path: &path::Path) -> Self {
         let text = fs::read_to_string(path).expect("設定ファイルの読み込みに失敗した");
-        toml::from_str(&text).expect("設定ファイルの解析に失敗した")
+        let config = toml::from_str::<Self>(&text).expect("Failed to parse font configuration");
+        config.validate();
+        config
+    }
+
+    /// 全エントリーを生成前に検証し、不正な設定による途中までの出力を防ぐ。
+    ///
+    /// # Panics
+    /// 丸み、半径、出力ウェイト、版、ASCII の必須項目が不正な場合。
+    pub fn validate(&self) {
+        assert!(
+            super::naming::parse_version(&self.version).is_some(),
+            "Invalid font version"
+        );
+        for entry in &self.fonts {
+            super::round::validate_parameters(entry.base_radius, entry.inner_radius, entry.rond)
+                .unwrap_or_else(|e| panic!("Invalid parameters for {}: {e:?}", entry.name));
+            assert!(
+                entry.weight_class.is_none_or(|w| (1..=1000).contains(&w)),
+                "Invalid weight class"
+            );
+            if entry.ascii_source.is_some() {
+                let radius = entry
+                    .ascii_base_radius
+                    .expect("ASCII base radius is required");
+                let inner = entry
+                    .ascii_inner_radius
+                    .expect("ASCII inner radius is required");
+                let rond = entry.ascii_rond.expect("ASCII roundness is required");
+                super::round::validate_parameters(radius, inner, rond).unwrap_or_else(|e| {
+                    panic!("Invalid ASCII parameters for {}: {e:?}", entry.name)
+                });
+            }
+        }
     }
 
     /// `entry` の変換元ファイルへの、実行時のカレントディレクトリからの
@@ -281,5 +317,17 @@ rond = 0.85
         sut(file.path());
 
         // Assert: #[should_panic] により、Act がパニックすることをもって検証する。
+    }
+    /// 最初の出力を生成する前に、後続エントリーの不正な丸みも検出する。
+    #[test]
+    fn configuration_validates_roundness_and_ascii_parameters() {
+        for value in ["nan", "inf", "-0.1", "1.1"] {
+            let text = CONFIG_TEXT.replace("rond = 0.85", &format!("rond = {value}"));
+            let config = toml::from_str::<super::Config>(&text).unwrap();
+            assert!(std::panic::catch_unwind(|| config.validate()).is_err());
+        }
+        let text = CONFIG_TEXT.replace("ascii_rond = 0.75", "ascii_rond = nan");
+        let config = toml::from_str::<super::Config>(&text).unwrap();
+        assert!(std::panic::catch_unwind(|| config.validate()).is_err());
     }
 }

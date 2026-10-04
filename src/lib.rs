@@ -122,6 +122,7 @@ pub fn convert_static(
     inner_radius: f64,
     t: f64,
 ) {
+    assert!(t.is_finite(), "Roundness interpolation must be finite");
     let font_data = fs::read(input_path).expect("入力フォントの読み込みに失敗した");
     let glyphs = outline::extract_glyphs(&font_data);
     let rounded_glyphs = glyphs
@@ -179,6 +180,10 @@ pub fn convert_static_with_ascii(
     ascii_inner_radius: f64,
     ascii_t: f64,
 ) {
+    assert!(
+        t.is_finite() && ascii_t.is_finite(),
+        "Roundness interpolation must be finite"
+    );
     use kurbo::Shape;
     use skrifa::raw::TableProvider;
 
@@ -219,8 +224,8 @@ pub fn convert_static_with_ascii(
         .into();
     // cap-height は、それぞれのフォントの 'H' の外接矩形の上端から求める。
     // 本体側は丸め済みの字形 (実際に出力される字形) を、差し替え側は丸める
-    // 前の字形を使うが、丸めは角を内側へ削るだけで外接矩形を変えないため、
-    // どちらを使っても比は同じになる。
+    // 前の字形を使い、実際の出力の高さに合わせる。角丸めによって外接矩形が
+    // 小さくなることがあるので、丸める前後が同じ高さとは仮定しない。
     let cap_height = final_glyphs[h_gid as usize].bounding_box().y1;
     let ascii_cap_height = ascii_glyphs[ascii_h_gid as usize].bounding_box().y1;
     let y_scale = cap_height / ascii_cap_height;
@@ -235,6 +240,11 @@ pub fn convert_static_with_ascii(
         .into();
     let x_scale = hmtx.advance(a_gid.into()).unwrap_or(500) as f64
         / ascii_hmtx.advance(ascii_a_gid.into()).unwrap_or(600) as f64;
+
+    assert!(
+        x_scale.is_finite() && x_scale > 0.0 && y_scale.is_finite() && y_scale > 0.0,
+        "ASCII replacement requires nonzero advances and cap heights"
+    );
 
     let affine = kurbo::Affine::new([x_scale, 0.0, 0.0, y_scale, 0.0, 0.0]);
 
