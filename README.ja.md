@@ -58,7 +58,7 @@ curl -LO https://github.com/notofonts/noto-cjk/releases/download/Sans2.004/11_No
 unzip -j 11_NotoSansMonoCJKjp.zip "*.otf" -d fonts
 ```
 
-Noto Sans JP ウェイト 490 (Sans Bold の変換元)。このウェイトの静的フォントファイルは提供されていないため、可変フォントからインスタンスを切り出します。インスタンス化した結果は TrueType (`glyf`) 形式で、輪郭の巻き方向が CFF の慣例と逆になっているため、同梱のスクリプトで全グリフの輪郭を反転しておきます。
+Noto Sans JP ウェイト 490 (Sans Bold の変換元)。このウェイトの静的フォントファイルは提供されていないため、可変フォントからインスタンスを切り出します。TrueType の輪郭方向は変換時に自動で正規化されます。以下では従来の設定ファイル名に合わせて反転済み入力を作りますが、手動反転は任意であり、このファイル名に反転前のインスタンスを置いても変換できます。
 
 ```sh
 curl -L -o "NotoSansJP[wght].ttf" "https://raw.githubusercontent.com/notofonts/noto-cjk/main/google-fonts/NotoSansJP%5Bwght%5D.ttf"
@@ -113,6 +113,8 @@ cargo run --release --bin rounded-noto-sans-cjk -- <入力フォント> <出力�
 ## 設定
 
 どのソースフォントをどのパラメータで変換するか、および出力されるフォントのファミリー名やスタイル名は `fonts.toml` で定義されています。別のウェイトを変換したい場合や、丸みの度合いを微調整したい場合は、`[[font]]` エントリーを編集してください。各設定項目の詳細については、同ファイル内のコメントを参照してください。
+
+`weight_class` は入力フォントのウェイトとは独立した、出力ファミリーのウェイト値です。配布する Regular は 400、Bold は 700 を指定します。省略した場合も、この2つのスタイルには同じ値が使われます。丸み `rond`・`ascii_rond` は有限の 0.0〜1.0、半径は有限の非負値を指定してください。設定は生成開始前に検証され、各出力は圧縮・幅調整・改名がすべて成功してから置換されます。
 
 ## ライセンス
 
