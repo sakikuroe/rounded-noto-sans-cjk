@@ -331,8 +331,11 @@ def adjust_outlines(font, origins, hangul, em):
         pen = T2CharStringPen(None, glyph_set, CFF2=True)
         recording.replay(TransformPen(pen, (scale, 0, 0, 1, offset, 0)))
         source_cs = cs[original]
+        # 最適化で点だけの輪郭の曲線を消すと連続した rmoveto が残り、
+        # tx が最初の移動を捨てて後続の輪郭を平行移動してしまう。
+        # ゼロ長の曲線も保ったまま後段のサブルーチン化へ渡す。
         program = pen.getCharString(private=source_cs.private,
-                                   globalSubrs=source_cs.globalSubrs)
+                                   globalSubrs=source_cs.globalSubrs, optimize=False)
         # 65,000 字形分の Python の座標オブジェクトを保持せず、順次バイト列化します。
         program.compile(isCFF2=True)
         programs[name] = program

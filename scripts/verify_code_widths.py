@@ -80,6 +80,14 @@ def verify(path, reference=None):
             assert sum(row[1] for row in rows) == em, (language, text, rows)
     # 罫線・ブロック要素は左右の境界位置を維持します。
     glyph_set = font.getGlyphSet()
+    # サンプル組版だけでは、特定の字形の圧縮による位置ずれを検出できません。
+    for glyph, (_, lsb) in metrics.items():
+        pen = BoundsPen(glyph_set)
+        glyph_set[glyph].draw(pen)
+        if pen.bounds:
+            assert abs(lsb - pen.bounds[0]) <= 1, (glyph, lsb, pen.bounds)
+        else:
+            assert lsb == 0, (glyph, lsb)
     for cp in (0x2500, 0x253C, 0x2580, 0x2584, 0x2588):
         glyph = cmap[cp]
         pen = BoundsPen(glyph_set)
