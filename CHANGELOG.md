@@ -2,12 +2,16 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 ### Fixed
 
-- Generated fonts now have CFF2-compatible tables, updated outline metrics, consistent style flags and matching name/head versions.
-- Duplicate outline points and degenerate curve tangents no longer cause invalid rounding. TrueType contour directions are normalized automatically, including previously reversed inputs.
-- Invalid roundness and unrepresentable CharString numbers are rejected before output. Batch generation preserves existing output when a later processing step fails.
-- Code fonts preserve point-only contours through CharString generation so compression no longer shifts later contours. Width verification now checks every glyph's left side bearing against its outline.
+- Fixed displaced glyphs in Code fonts, including Regular U+BF29.
+- Corrected corner rounding for repeated outline points and TrueType inputs, including Sans Bold U+02C7 and Sans Regular U+5F13.
+- Updated font bounds, style information and internal versions for consistent font identification and layout.
+- Invalid generation parameters are rejected, and failed generation preserves existing output files.
+
+## [0.1.2] - 2026-10-04
 
 ### Changed
 
